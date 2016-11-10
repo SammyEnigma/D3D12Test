@@ -126,6 +126,7 @@ struct FInstance
 #if ENABLE_VULKAN
 		DestroySurface();
 		DestroyDebugCallback();
+#endif
 		DestroyInstance();
 	}
 };
