@@ -39,22 +39,16 @@ void FSwapchain::Create(IDXGIFactory4* DXGI, HWND Hwnd, FDevice& Device, uint32&
 	Desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 	checkD3D12(DXGI->CreateSwapChain(Device.Queue.Get(), &Desc, &Swapchain));
 
-#if ENABLE_VULKAN
-	uint32 NumImages;
-	checkVk(vkGetSwapchainImagesKHR(Device, Swapchain, &NumImages, nullptr));
-	Images.resize(NumImages);
-	ImageViews.resize(NumImages);
-	PresentCompleteSemaphores.resize(NumImages);
-	RenderingSemaphores.resize(NumImages);
-	checkVk(vkGetSwapchainImagesKHR(Device, Swapchain, &NumImages, &Images[0]));
-
-	for (uint32 Index = 0; Index < NumImages; ++Index)
+	for (uint32 Index = 0; Index < BufferCount; ++Index)
 	{
+		ID3D12Resource* Resource;
+		checkD3D12(Swapchain->GetBuffer(Index, IID_PPV_ARGS(&Resource)));
+#if ENABLE_VULKAN
 		ImageViews[Index].Create(Device, Images[Index], VK_IMAGE_VIEW_TYPE_2D, (VkFormat)BACKBUFFER_VIEW_FORMAT, VK_IMAGE_ASPECT_COLOR_BIT);
 		PresentCompleteSemaphores[Index].Create(Device);
 		RenderingSemaphores[Index].Create(Device);
-	}
 #endif
+	}
 }
 
 #if ENABLE_VULKAN

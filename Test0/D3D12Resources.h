@@ -1067,6 +1067,7 @@ inline void BufferBarrier(FCmdBuffer* CmdBuffer, VkPipelineStageFlags SrcStage, 
 struct FSwapchain
 {
 	Microsoft::WRL::ComPtr<IDXGISwapChain> Swapchain;
+	Microsoft::WRL::ComPtr<IDXGISwapChain1> Swapchain1;
 	const uint32 BufferCount = 3;
 #if ENABLE_VULKAN
 	enum
@@ -1088,9 +1089,10 @@ struct FSwapchain
 	uint32 PresentCompleteSemaphoreIndex = 0;
 	uint32 RenderingSemaphoreIndex = 0;
 	VkExtent2D SurfaceResolution;
+#endif
+	uint32 AcquiredImageIndex = 0;
 
-	uint32 AcquiredImageIndex = UINT32_MAX;
-
+#if ENABLE_VULKAN
 	inline VkImage GetAcquiredImage()
 	{
 		return Images[AcquiredImageIndex];
@@ -1152,27 +1154,13 @@ struct FSwapchain
 			ImageBarrier(CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, Images[Index], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_MEMORY_READ_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
 		}
 	}
+#endif
 
-	void AcquireNextImage()
+	void Present(ID3D12CommandQueue* Queue)
 	{
-		PresentCompleteSemaphoreIndex = (PresentCompleteSemaphoreIndex + 1) % PresentCompleteSemaphores.size();
-		VkResult Result = vkAcquireNextImageKHR(Device, Swapchain, UINT64_MAX, PresentCompleteSemaphores[PresentCompleteSemaphoreIndex].Semaphore, VK_NULL_HANDLE, &AcquiredImageIndex);
-		switch (Result)
-		{
-		case VK_SUCCESS:
-		case VK_SUBOPTIMAL_KHR:
-			break;
-		case VK_ERROR_OUT_OF_DATE_KHR:
-			check(0);
-			break;
-		default:
-			checkVk(Result);
-			break;
-		}
-	}
-
-	void Present(VkQueue PresentQueue)
-	{
+		uint32 SyncInterval = 1;
+		checkD3D12(Swapchain->Present(SyncInterval, 0));
+#if ENABLE_VULKAN
 		VkPresentInfoKHR Info;
 		MemZero(Info);
 		Info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -1182,8 +1170,9 @@ struct FSwapchain
 		Info.pSwapchains = &Swapchain;
 		Info.pImageIndices = &AcquiredImageIndex;
 		checkVk(vkQueuePresentKHR(PresentQueue, &Info));
-	}
 #endif
+		++AcquiredImageIndex;
+	}
 };
 
 #if ENABLE_VULKAN

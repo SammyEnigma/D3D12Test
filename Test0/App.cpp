@@ -262,9 +262,10 @@ struct FPosColorUVVertex
 	float u, v;
 };
 FVertexFormat GPosColorUVFormat;
-
+#endif
 bool GQuitting = false;
 
+#if ENABLE_VULKAN
 struct FTestPSO : public FGfxPSO
 {
 	virtual void SetupLayoutBindings(std::vector<VkDescriptorSetLayoutBinding>& OutBindings) override
@@ -999,14 +1000,14 @@ void DoRender()
 {
 #if ENABLE_VULKAN
 	GRenderTargetPool.EmptyPool();
-
+#endif
 	if (GQuitting)
 	{
 		return;
 	}
 
 	GControl = GRequestControl;
-
+#if ENABLE_VULKAN
 	auto* CmdBuffer = GCmdBufferMgr.GetActivePrimaryCmdBuffer();
 	CmdBuffer->Begin();
 
@@ -1073,9 +1074,7 @@ void DoRender()
 		RenderPost(GDevice.Device, CmdBuffer, PrePost, SceneColor);
 #endif
 	}
-
 	// Blit post into scene color
-	GSwapchain.AcquireNextImage();
 	ImageBarrier(CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, GSwapchain.Images[GSwapchain.AcquiredImageIndex], VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 0, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
 
 	{
@@ -1091,9 +1090,8 @@ void DoRender()
 
 	// First submit needs to wait for present semaphore
 	GCmdBufferMgr.Submit(CmdBuffer, GDevice.PresentQueue, &GSwapchain.PresentCompleteSemaphores[GSwapchain.PresentCompleteSemaphoreIndex], &GSwapchain.RenderingSemaphores[GSwapchain.AcquiredImageIndex]);
-
-	GSwapchain.Present(GDevice.PresentQueue);
 #endif
+	GSwapchain.Present(GDevice.Queue.Get());
 }
 
 void DoResize(uint32 Width, uint32 Height)
@@ -1120,8 +1118,9 @@ void DoDeinit()
 	SetEvent(GThread.StartEvent);
 	WaitForMultipleObjects(1, &GThread.ThreadHandle, TRUE, INFINITE);
 #endif
+#endif
 	GQuitting = true;
-
+#if ENABLE_VULKAN
 	GFloorIB.Destroy();
 	GFloorVB.Destroy();
 	GViewUB.Destroy();

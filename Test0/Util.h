@@ -13,7 +13,7 @@ typedef int64_t int64;
 
 #define check(x) if (!(x)) __debugbreak();
 
-#define checkD3D12(r) check(SUCCEEDED(r))
+#define checkD3D12(r) do { HRESULT hr = r; check(SUCCEEDED(hr)); hr = hr; } while (0)
 
 
 template <typename T>
