@@ -20,19 +20,27 @@ void FInstance::SetupDebugLayer()
 
 void FSwapchain::Create(IDXGIFactory4* DXGI, HWND Hwnd, FDevice& Device, uint32& WindowWidth, uint32& WindowHeight)
 {
-	uint32 NumImages = 3;
+	Width = WindowWidth;
+	Height = WindowHeight;
 
-	DXGI_SWAP_CHAIN_DESC1 Desc;
+	DXGI_SWAP_CHAIN_DESC Desc;
 	MemZero(Desc);
-	Desc.Width = WindowWidth;
-	Desc.Height = WindowHeight;
-	Desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-	Desc.BufferUsage = DXGI_USAGE_BACK_BUFFER | DXGI_USAGE_SHADER_INPUT;
-	Desc.BufferCount = NumImages;
-	Desc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-	checkD3D12(DXGI->CreateSwapChainForHwnd(Device.Device.Get(), Hwnd, &Desc, nullptr, nullptr, &Swapchain));
+	Desc.BufferDesc.Width = WindowWidth;
+	Desc.BufferDesc.Height = WindowHeight;
+	//Desc.BufferDesc.RefreshRate.Numerator = 60;
+	//Desc.BufferDesc.RefreshRate.Denominator = 1;
+	Desc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	//Desc.BufferDesc.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_PROGRESSIVE;
+	Desc.BufferUsage = DXGI_USAGE_BACK_BUFFER | DXGI_USAGE_SHADER_INPUT | DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	Desc.BufferCount = BufferCount;
+	Desc.SampleDesc.Count = 1;
+	Desc.OutputWindow = Hwnd;
+	Desc.Windowed = true;
+	Desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+	checkD3D12(DXGI->CreateSwapChain(Device.Queue.Get(), &Desc, &Swapchain));
 
 #if ENABLE_VULKAN
+	uint32 NumImages;
 	checkVk(vkGetSwapchainImagesKHR(Device, Swapchain, &NumImages, nullptr));
 	Images.resize(NumImages);
 	ImageViews.resize(NumImages);

@@ -23,7 +23,8 @@ struct FInstance
 	void CreateInstance()
 	{
 		SetupDebugLayer();
-		checkD3D12(CreateDXGIFactory1(IID_PPV_ARGS(&DXGIFactory)));
+		//DXGI_CREATE_FACTORY_DEBUG
+		checkD3D12(CreateDXGIFactory2(DXGI_CREATE_FACTORY_DEBUG, IID_PPV_ARGS(&DXGIFactory)));
 	}
 
 	void SetupDebugLayer();
@@ -97,6 +98,11 @@ struct FDevice
 		Device = nullptr;
 		Adapter = nullptr;
 	}
+
+	operator ID3D12Device* ()
+	{
+		return Device.Get();
+	}
 };
 
 #if ENABLE_VULKAN
@@ -162,14 +168,16 @@ struct FFence
 		}
 	}
 };
+#endif
 
 struct FCmdBuffer
 {
+#if ENABLE_VULKAN
 	VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
 	VkDevice Device = VK_NULL_HANDLE;
 
 	FFence* Fence = nullptr;
-
+#endif
 	enum class EState
 	{
 		ReadyForBegin,
@@ -180,6 +188,7 @@ struct FCmdBuffer
 	};
 	EState State = EState::ReadyForBegin;
 
+#if ENABLE_VULKAN
 	virtual void Destroy(VkDevice Device, VkCommandPool Pool)
 	{
 		if (State == EState::Submitted)
@@ -215,9 +224,10 @@ struct FCmdBuffer
 			RefreshState();
 		}
 	}
-
+#endif
 	void RefreshState()
 	{
+#if ENABLE_VULKAN
 		if (State == EState::Submitted)
 		{
 			uint64 PrevCounter = Fence->FenceSignaledCounter;
@@ -228,8 +238,10 @@ struct FCmdBuffer
 				State = EState::ReadyForBegin;
 			}
 		}
+#endif
 	}
 
+#if ENABLE_VULKAN
 	virtual struct FSecondaryCmdBuffer* GetSecondary()
 	{
 		return nullptr;
@@ -241,14 +253,18 @@ struct FCmdBuffer
 		checkVk(vkEndCommandBuffer(CmdBuffer));
 		State = EState::Ended;
 	}
+#endif
 };
 
 struct FPrimaryCmdBuffer : public FCmdBuffer
 {
+#if ENABLE_VULKAN
 	FFence PrimaryFence;
+#endif
 
-	void Create(VkDevice InDevice, VkCommandPool Pool)
+	void Create(/*VkDevice InDevice, VkCommandPool Pool*/)
 	{
+#if ENABLE_VULKAN
 		Device = InDevice;
 
 		PrimaryFence.Create(Device);
@@ -262,21 +278,23 @@ struct FPrimaryCmdBuffer : public FCmdBuffer
 		Info.commandBufferCount = 1;
 
 		checkVk(vkAllocateCommandBuffers(Device, &Info, &CmdBuffer));
+#endif
 	}
 
 	void Begin()
 	{
 		check(State == EState::ReadyForBegin);
-
+#if ENABLE_VULKAN
 		VkCommandBufferBeginInfo Info;
 		MemZero(Info);
 		Info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 		Info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 		checkVk(vkBeginCommandBuffer(CmdBuffer, &Info));
-
+#endif
 		State = EState::Begun;
 	}
 
+#if ENABLE_VULKAN
 	void ExecuteSecondary()
 	{
 		check(State != FCmdBuffer::EState::Ended && State != FCmdBuffer::EState::Submitted);
@@ -296,8 +314,10 @@ struct FPrimaryCmdBuffer : public FCmdBuffer
 
 	std::list<struct FSecondaryCmdBuffer*> Secondary;
 	std::vector<VkCommandBuffer> SecondaryList;
+#endif
 };
 
+#if ENABLE_VULKAN
 struct FSecondaryCmdBuffer : public FCmdBuffer
 {
 	void BeginSecondary(FPrimaryCmdBuffer* ParentCmdBuffer, VkRenderPass RenderPass, VkFramebuffer Framebuffer)
@@ -391,16 +411,17 @@ struct FSemaphore
 		Semaphore = VK_NULL_HANDLE;
 	}
 };
+#endif
+
 
 struct FCmdBufferMgr
 {
+#if ENABLE_VULKAN
 	VkCommandPool Pool = VK_NULL_HANDLE;
-	VkDevice Device = VK_NULL_HANDLE;
-
-	void Create(VkDevice InDevice, uint32 QueueFamilyIndex)
+#endif
+	void Create()
 	{
-		Device = InDevice;
-
+#if ENABLE_VULKAN
 		VkCommandPoolCreateInfo PoolInfo;
 		MemZero(PoolInfo);
 		PoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -408,10 +429,12 @@ struct FCmdBufferMgr
 		PoolInfo.queueFamilyIndex = QueueFamilyIndex;
 
 		checkVk(vkCreateCommandPool(Device, &PoolInfo, nullptr, &Pool));
+#endif
 	}
 
 	void Destroy()
 	{
+#if ENABLE_VULKAN
 		for (auto* CB : CmdBuffers)
 		{
 			CB->RefreshState();
@@ -430,6 +453,7 @@ struct FCmdBufferMgr
 
 		vkDestroyCommandPool(Device, Pool, nullptr);
 		Pool = VK_NULL_HANDLE;
+#endif
 	}
 
 	FPrimaryCmdBuffer* AllocateCmdBuffer()
@@ -444,11 +468,12 @@ struct FCmdBufferMgr
 		}
 
 		auto* NewCmdBuffer = new FPrimaryCmdBuffer;
-		NewCmdBuffer->Create(Device, Pool);
+		NewCmdBuffer->Create();
 		CmdBuffers.push_back(NewCmdBuffer);
 		return NewCmdBuffer;
 	}
 
+#if ENABLE_VULKAN
 	FSecondaryCmdBuffer* AllocateSecondaryCmdBuffer(FFence* ParentFence)
 	{
 		for (auto* CmdBuffer : SecondaryCmdBuffers)
@@ -499,7 +524,7 @@ struct FCmdBufferMgr
 
 		return AllocateCmdBuffer();
 	}*/
-
+#endif
 	FPrimaryCmdBuffer* GetActivePrimaryCmdBuffer()
 	{
 		for (auto* CB : CmdBuffers)
@@ -519,8 +544,9 @@ struct FCmdBufferMgr
 		return AllocateCmdBuffer();
 	}
 
-	void Submit(FPrimaryCmdBuffer* CmdBuffer, VkQueue Queue, FSemaphore* WaitSemaphore, FSemaphore* SignaledSemaphore)
+	void Submit(/*FPrimaryCmdBuffer* CmdBuffer, VkQueue Queue, FSemaphore* WaitSemaphore, FSemaphore* SignaledSemaphore*/)
 	{
+#if ENABLE_VULKAN
 		check(CmdBuffer->State == FPrimaryCmdBuffer::EState::Ended);
 		check(CmdBuffer->Secondary.empty());
 		VkPipelineStageFlags StageMask[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
@@ -543,6 +569,7 @@ struct FCmdBufferMgr
 		checkVk(vkQueueSubmit(Queue, 1, &Info, CmdBuffer->Fence->Fence));
 		CmdBuffer->Fence->State = FFence::EState::NotSignaled;
 		CmdBuffer->State = FPrimaryCmdBuffer::EState::Submitted;
+#endif
 		Update();
 	}
 
@@ -553,16 +580,21 @@ struct FCmdBufferMgr
 			CmdBuffer->RefreshState();
 		}
 
+#if ENABLE_VULKAN
 		for (auto* CmdBuffer : SecondaryCmdBuffers)
 		{
 			CmdBuffer->RefreshState();
 		}
+#endif
 	}
 
 	std::list<FPrimaryCmdBuffer*> CmdBuffers;
+#if ENABLE_VULKAN
 	std::list<FSecondaryCmdBuffer*> SecondaryCmdBuffers;
+#endif
 };
 
+#if ENABLE_VULKAN
 static inline uint32 GetFormatBitsPerPixel(VkFormat Format)
 {
 	switch (Format)

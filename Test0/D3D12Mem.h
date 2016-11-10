@@ -2,9 +2,9 @@
 
 #pragma once
 
-#if ENABLE_VULKAN
+#include "D3D12Device.h"
 
-#include "VkDevice.h"
+#if ENABLE_VULKAN
 
 class FMemSubAlloc;
 
@@ -137,18 +137,22 @@ protected:
 	FMemPage* Owner;
 	friend class FMemPage;
 };
+#endif
 
 struct FMemManager
 {
-	void Create(VkDevice InDevice, VkPhysicalDevice PhysicalDevice)
+	void Create(FDevice& InDevice)
 	{
+#if ENABLE_VULKAN
 		Device = InDevice;
 		vkGetPhysicalDeviceMemoryProperties(PhysicalDevice, &Properties);
 		check(Properties.memoryTypeCount != 0 && Properties.memoryHeapCount != 0);
+#endif
 	}
 
 	void Destroy()
 	{
+#if ENABLE_VULKAN
 		auto Free = [&](auto& PageMap)
 		{
 			for (auto& Pair : PageMap)
@@ -161,8 +165,10 @@ struct FMemManager
 		};
 		Free(BufferPages);
 		Free(ImagePages);
+#endif
 	}
 
+#if ENABLE_VULKAN
 	uint32 GetMemTypeIndex(uint32 RequestedTypeBits, VkMemoryPropertyFlags PropertyFlags) const
 	{
 		for (uint32 Index = 0; Index < Properties.memoryTypeCount; ++Index)
@@ -208,6 +214,7 @@ struct FMemManager
 
 	std::map<uint32, std::list<FMemPage*>> BufferPages;
 	std::map<uint32, std::list<FMemPage*>> ImagePages;
+#endif
 };
 
 struct FRecyclableResource
@@ -298,5 +305,4 @@ protected:
 };
 
 FResourceRecycler GResourceRecycler;
-#endif
 #endif

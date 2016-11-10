@@ -31,9 +31,9 @@ FVector4 GCameraPos = {0, 0, -10, 1};
 static FInstance GInstance;
 static FDevice GDevice;
 static FSwapchain GSwapchain;
-#if ENABLE_VULKAN
-static FMemManager GMemMgr;
 static FCmdBufferMgr GCmdBufferMgr;
+static FMemManager GMemMgr;
+#if ENABLE_VULKAN
 static FDescriptorPool GDescriptorPool;
 static FStagingManager GStagingManager;
 
@@ -768,13 +768,10 @@ bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 
 	GInstance.Create(hInstance, hWnd);
 	GInstance.CreateDevice(GDevice);
+	GCmdBufferMgr.Create(/*GDevice.Device, GDevice.PresentQueueFamilyIndex*/);
 	GSwapchain.Create(GInstance.DXGIFactory.Get(), hWnd, GDevice, Width, Height);
-
+	GMemMgr.Create(GDevice);
 #if ENABLE_VULKAN
-
-	GCmdBufferMgr.Create(GDevice.Device, GDevice.PresentQueueFamilyIndex);
-
-	GMemMgr.Create(GDevice.Device, GDevice.PhysicalDevice);
 
 	GDescriptorPool.Create(GDevice.Device);
 	GStagingManager.Create(GDevice.Device, &GMemMgr);
@@ -1150,9 +1147,9 @@ void DoDeinit()
 
 	GStagingManager.Destroy();
 	GObjectCache.Destroy();
-	GCmdBufferMgr.Destroy();
-	GMemMgr.Destroy();
 #endif
+	GMemMgr.Destroy();
+	GCmdBufferMgr.Destroy();
 	GSwapchain.Destroy();
 	GDevice.Destroy();
 	GInstance.Destroy();

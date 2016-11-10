@@ -1066,7 +1066,8 @@ inline void BufferBarrier(FCmdBuffer* CmdBuffer, VkPipelineStageFlags SrcStage, 
 #endif
 struct FSwapchain
 {
-	Microsoft::WRL::ComPtr<IDXGISwapChain1> Swapchain;
+	Microsoft::WRL::ComPtr<IDXGISwapChain> Swapchain;
+	const uint32 BufferCount = 3;
 #if ENABLE_VULKAN
 	enum
 	{
@@ -1074,6 +1075,8 @@ struct FSwapchain
 		BACKBUFFER_VIEW_FORMAT = VK_FORMAT_R8G8B8A8_UNORM,
 	};
 #endif
+	uint32 Width = 0;
+	uint32 Height = 0;
 	void Create(IDXGIFactory4* DXGI, HWND Hwnd, FDevice& Device, uint32& WindowWidth, uint32& WindowHeight);
 
 #if ENABLE_VULKAN
@@ -1121,18 +1124,18 @@ struct FSwapchain
 		Swapchain = nullptr;
 	}
 
-#if ENABLE_VULKAN
 	inline uint32 GetWidth() const
 	{
-		return SurfaceResolution.width;
+		return Width;
 	}
 
 
 	inline uint32 GetHeight() const
 	{
-		return SurfaceResolution.height;
+		return Height;
 	}
 
+#if ENABLE_VULKAN
 	void ClearAndTransitionToPresent(FPrimaryCmdBuffer* CmdBuffer)
 	{
 		VkClearColorValue Color;
