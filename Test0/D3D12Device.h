@@ -172,10 +172,8 @@ struct FFence
 
 struct FCmdBuffer
 {
+	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList > CommandList;
 #if ENABLE_VULKAN
-	VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
-	VkDevice Device = VK_NULL_HANDLE;
-
 	FFence* Fence = nullptr;
 #endif
 	enum class EState
@@ -188,9 +186,9 @@ struct FCmdBuffer
 	};
 	EState State = EState::ReadyForBegin;
 
-#if ENABLE_VULKAN
-	virtual void Destroy(VkDevice Device, VkCommandPool Pool)
+	virtual void Destroy()
 	{
+#if ENABLE_VULKAN
 		if (State == EState::Submitted)
 		{
 			RefreshState();
@@ -203,8 +201,12 @@ struct FCmdBuffer
 		}
 		vkFreeCommandBuffers(Device, Pool, 1, &CmdBuffer);
 		CmdBuffer = VK_NULL_HANDLE;
+		Fence->Destroy(Device);
+#endif
+		CommandList = nullptr;
 	}
 
+#if ENABLE_VULKAN
 	void BeginRenderPass(VkRenderPass RenderPass, const struct FFramebuffer& Framebuffer, bool bHasSecondary);
 
 	void EndRenderPass()
@@ -234,146 +236,37 @@ struct FCmdBuffer
 			Fence->RefreshState();
 			if (PrevCounter != Fence->FenceSignaledCounter)
 			{
-				checkVk(vkResetCommandBuffer(CmdBuffer, 0));
+				CommandList->Reset();
 				State = EState::ReadyForBegin;
 			}
 		}
 #endif
 	}
 
-#if ENABLE_VULKAN
-	virtual struct FSecondaryCmdBuffer* GetSecondary()
-	{
-		return nullptr;
-	}
-
 	void End()
 	{
 		check(State == EState::Begun);
-		checkVk(vkEndCommandBuffer(CmdBuffer));
+		CommandList->Close();
 		State = EState::Ended;
 	}
-#endif
-};
 
-struct FPrimaryCmdBuffer : public FCmdBuffer
-{
 #if ENABLE_VULKAN
 	FFence PrimaryFence;
 #endif
 
-	void Create(/*VkDevice InDevice, VkCommandPool Pool*/)
+	void Create(FDevice& InDevice, ID3D12CommandAllocator* Allocator)
 	{
-#if ENABLE_VULKAN
-		Device = InDevice;
-
-		PrimaryFence.Create(Device);
-		Fence = &PrimaryFence;
-
-		VkCommandBufferAllocateInfo Info;
-		MemZero(Info);
-		Info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-		Info.commandPool = Pool;
-		Info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		Info.commandBufferCount = 1;
-
-		checkVk(vkAllocateCommandBuffers(Device, &Info, &CmdBuffer));
-#endif
+		checkD3D12(InDevice.Device->CreateCommandList(1, D3D12_COMMAND_LIST_TYPE_DIRECT, Allocator, nullptr, _uuidof(ID3D12GraphicsCommandList), &CommandList));
 	}
 
 	void Begin()
 	{
 		check(State == EState::ReadyForBegin);
-#if ENABLE_VULKAN
-		VkCommandBufferBeginInfo Info;
-		MemZero(Info);
-		Info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-		Info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-		checkVk(vkBeginCommandBuffer(CmdBuffer, &Info));
-#endif
 		State = EState::Begun;
 	}
-
-#if ENABLE_VULKAN
-	void ExecuteSecondary()
-	{
-		check(State != FCmdBuffer::EState::Ended && State != FCmdBuffer::EState::Submitted);
-		if (!Secondary.empty())
-		{
-			vkCmdExecuteCommands(CmdBuffer, (uint32)Secondary.size(), &SecondaryList[0]);
-			Secondary.resize(0);
-			SecondaryList.resize(0);
-		}
-	}
-
-	virtual void Destroy(VkDevice Device, VkCommandPool Pool) override
-	{
-		FCmdBuffer::Destroy(Device, Pool);
-		Fence->Destroy(Device);
-	}
-
-	std::list<struct FSecondaryCmdBuffer*> Secondary;
-	std::vector<VkCommandBuffer> SecondaryList;
-#endif
 };
 
 #if ENABLE_VULKAN
-struct FSecondaryCmdBuffer : public FCmdBuffer
-{
-	void BeginSecondary(FPrimaryCmdBuffer* ParentCmdBuffer, VkRenderPass RenderPass, VkFramebuffer Framebuffer)
-	{
-		check(State == EState::ReadyForBegin);
-
-		VkCommandBufferInheritanceInfo Inheritance;
-		MemZero(Inheritance);
-		Inheritance.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
-		//uint32_t                         subpass;
-		//VkBool32                         occlusionQueryEnable;
-		//VkQueryControlFlags              queryFlags;
-		//VkQueryPipelineStatisticFlags    pipelineStatistics;
-		VkCommandBufferBeginInfo Info;
-		MemZero(Info);
-		Info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-		Info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-		if (RenderPass != VK_NULL_HANDLE)
-		{
-			Info.flags |= VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
-			Inheritance.renderPass = RenderPass;
-			Inheritance.framebuffer = Framebuffer;
-		}
-		else
-		{
-			check(Framebuffer == VK_NULL_HANDLE);
-		}
-		Info.pInheritanceInfo = &Inheritance;
-		checkVk(vkBeginCommandBuffer(CmdBuffer, &Info));
-
-		State = EState::Begun;
-
-		ParentCmdBuffer->Secondary.push_back(this);
-		ParentCmdBuffer->SecondaryList.push_back(CmdBuffer);
-	}
-
-	void CreateSecondary(VkDevice InDevice, VkCommandPool Pool, FFence* ParentFence)
-	{
-		Device = InDevice;
-
-		VkCommandBufferAllocateInfo Info;
-		MemZero(Info);
-		Info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-		Info.commandPool = Pool;
-		Info.level = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
-		Info.commandBufferCount = 1;
-
-		checkVk(vkAllocateCommandBuffers(Device, &Info, &CmdBuffer));
-	}
-
-	virtual struct FSecondaryCmdBuffer* GetSecondary()
-	{
-		return this;
-	}
-};
-
 class FCmdBufferFence
 {
 protected:
@@ -416,11 +309,11 @@ struct FSemaphore
 
 struct FCmdBufferMgr
 {
-#if ENABLE_VULKAN
-	VkCommandPool Pool = VK_NULL_HANDLE;
-#endif
-	void Create()
+	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> Allocator;
+
+	void Create(FDevice& Device)
 	{
+		checkD3D12(Device.Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, __uuidof(ID3D12CommandAllocator), &Allocator));
 #if ENABLE_VULKAN
 		VkCommandPoolCreateInfo PoolInfo;
 		MemZero(PoolInfo);
@@ -456,43 +349,24 @@ struct FCmdBufferMgr
 #endif
 	}
 
-	FPrimaryCmdBuffer* AllocateCmdBuffer()
+	FCmdBuffer* AllocateCmdBuffer(FDevice& Device)
 	{
 		for (auto* CmdBuffer : CmdBuffers)
 		{
 			CmdBuffer->RefreshState();
-			if (CmdBuffer->State == FPrimaryCmdBuffer::EState::ReadyForBegin)
+			if (CmdBuffer->State == FCmdBuffer::EState::ReadyForBegin)
 			{
 				return CmdBuffer;
 			}
 		}
 
-		auto* NewCmdBuffer = new FPrimaryCmdBuffer;
-		NewCmdBuffer->Create();
+		auto* NewCmdBuffer = new FCmdBuffer;
+		NewCmdBuffer->Create(Device, Allocator.Get());
 		CmdBuffers.push_back(NewCmdBuffer);
 		return NewCmdBuffer;
 	}
 
-#if ENABLE_VULKAN
-	FSecondaryCmdBuffer* AllocateSecondaryCmdBuffer(FFence* ParentFence)
-	{
-		for (auto* CmdBuffer : SecondaryCmdBuffers)
-		{
-			CmdBuffer->RefreshState();
-			if (CmdBuffer->State == FPrimaryCmdBuffer::EState::ReadyForBegin)
-			{
-				CmdBuffer->Fence = ParentFence;
-				return CmdBuffer;
-			}
-		}
-
-		auto* NewCmdBuffer = new FSecondaryCmdBuffer;
-		NewCmdBuffer->CreateSecondary(Device, Pool, ParentFence);
-		SecondaryCmdBuffers.push_back(NewCmdBuffer);
-		return NewCmdBuffer;
-	}
-/*
-	FCmdBuffer* GetActiveCmdBuffer()
+	FCmdBuffer* GetActiveCmdBuffer(FDevice& Device)
 	{
 		for (auto* CB : CmdBuffers)
 		{
@@ -508,46 +382,13 @@ struct FCmdBufferMgr
 			}
 		}
 
-		for (auto* CB : SecondaryCmdBuffers)
-		{
-			switch (CB->State)
-			{
-			case FCmdBuffer::EState::Submitted:
-				CB->RefreshState();
-				break;
-			case FCmdBuffer::EState::ReadyForBegin:
-				return CB;
-			default:
-				break;
-			}
-		}
-
-		return AllocateCmdBuffer();
-	}*/
-#endif
-	FPrimaryCmdBuffer* GetActivePrimaryCmdBuffer()
-	{
-		for (auto* CB : CmdBuffers)
-		{
-			switch (CB->State)
-			{
-			case FPrimaryCmdBuffer::EState::Submitted:
-				CB->RefreshState();
-				break;
-			case FPrimaryCmdBuffer::EState::ReadyForBegin:
-				return CB;
-			default:
-				break;
-			}
-		}
-
-		return AllocateCmdBuffer();
+		return AllocateCmdBuffer(Device);
 	}
 
-	void Submit(/*FPrimaryCmdBuffer* CmdBuffer, VkQueue Queue, FSemaphore* WaitSemaphore, FSemaphore* SignaledSemaphore*/)
+	void Submit(FDevice& Device, FCmdBuffer* CmdBuffer/*, VkQueue Queue, FSemaphore* WaitSemaphore, FSemaphore* SignaledSemaphore*/)
 	{
+		check(CmdBuffer->State == FCmdBuffer::EState::Ended);
 #if ENABLE_VULKAN
-		check(CmdBuffer->State == FPrimaryCmdBuffer::EState::Ended);
 		check(CmdBuffer->Secondary.empty());
 		VkPipelineStageFlags StageMask[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
 		VkSubmitInfo Info;
@@ -567,8 +408,12 @@ struct FCmdBufferMgr
 			Info.pSignalSemaphores = &SignaledSemaphore->Semaphore;
 		}
 		checkVk(vkQueueSubmit(Queue, 1, &Info, CmdBuffer->Fence->Fence));
+#endif
+		ID3D12CommandList* CmdList = CmdBuffer->CommandList.Get();
+		Device.Queue->ExecuteCommandLists(1, &CmdList);
+#if ENABLE_VULKAN
 		CmdBuffer->Fence->State = FFence::EState::NotSignaled;
-		CmdBuffer->State = FPrimaryCmdBuffer::EState::Submitted;
+		CmdBuffer->State = FCmdBuffer::EState::Submitted;
 #endif
 		Update();
 	}
@@ -579,19 +424,9 @@ struct FCmdBufferMgr
 		{
 			CmdBuffer->RefreshState();
 		}
-
-#if ENABLE_VULKAN
-		for (auto* CmdBuffer : SecondaryCmdBuffers)
-		{
-			CmdBuffer->RefreshState();
-		}
-#endif
 	}
 
-	std::list<FPrimaryCmdBuffer*> CmdBuffers;
-#if ENABLE_VULKAN
-	std::list<FSecondaryCmdBuffer*> SecondaryCmdBuffers;
-#endif
+	std::list<FCmdBuffer*> CmdBuffers;
 };
 
 #if ENABLE_VULKAN

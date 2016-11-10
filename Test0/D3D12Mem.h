@@ -141,27 +141,8 @@ protected:
 
 struct FMemManager
 {
-	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> RTVHeap;
-	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> CSUHeap;
-
 	void Create(FDevice& InDevice)
 	{
-		D3D12_DESCRIPTOR_HEAP_DESC HeapDesc;
-		MemZero(HeapDesc);
-		HeapDesc.NodeMask = 1;
-		HeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-		{
-			HeapDesc.NumDescriptors = 256;
-			HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-			checkD3D12(InDevice.Device->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&RTVHeap)));
-		}
-
-		{
-			HeapDesc.NumDescriptors = 2048;
-			HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-			checkD3D12(InDevice.Device->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&CSUHeap)));
-		}
-
 #if ENABLE_VULKAN
 		vkGetPhysicalDeviceMemoryProperties(PhysicalDevice, &Properties);
 		check(Properties.memoryTypeCount != 0 && Properties.memoryHeapCount != 0);
@@ -184,8 +165,6 @@ struct FMemManager
 		Free(BufferPages);
 		Free(ImagePages);
 #endif
-		CSUHeap = nullptr;
-		RTVHeap = nullptr;
 	}
 
 #if ENABLE_VULKAN

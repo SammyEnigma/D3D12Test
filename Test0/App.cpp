@@ -33,8 +33,8 @@ static FDevice GDevice;
 static FSwapchain GSwapchain;
 static FCmdBufferMgr GCmdBufferMgr;
 static FMemManager GMemMgr;
-#if ENABLE_VULKAN
 static FDescriptorPool GDescriptorPool;
+#if ENABLE_VULKAN
 static FStagingManager GStagingManager;
 
 
@@ -228,7 +228,7 @@ static FRenderTargetPool GRenderTargetPool;
 #if TRY_MULTITHREADED > 0
 struct FThread
 {
-	volatile FPrimaryCmdBuffer* ParentCmdBuffer = nullptr;
+	volatile FCmdBuffer* ParentCmdBuffer = nullptr;
 	volatile HANDLE StartEvent = INVALID_HANDLE_VALUE;
 	volatile HANDLE DoneEvent = INVALID_HANDLE_VALUE;
 	volatile bool bDoQuit = false;
@@ -769,12 +769,11 @@ bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 
 	GInstance.Create(hInstance, hWnd);
 	GInstance.CreateDevice(GDevice);
-	GCmdBufferMgr.Create(/*GDevice.Device, GDevice.PresentQueueFamilyIndex*/);
+	GCmdBufferMgr.Create(GDevice/*.Device, GDevice.PresentQueueFamilyIndex*/);
 	GSwapchain.Create(GInstance.DXGIFactory.Get(), hWnd, GDevice, Width, Height);
 	GMemMgr.Create(GDevice);
+	GDescriptorPool.Create(GDevice);
 #if ENABLE_VULKAN
-
-	GDescriptorPool.Create(GDevice.Device);
 	GStagingManager.Create(GDevice.Device, &GMemMgr);
 
 	GObjectCache.Create(&GDevice);
@@ -904,7 +903,7 @@ static void InternalRenderFrame(VkDevice Device, FRenderPass* RenderPass, FCmdBu
 	DrawCube(GfxPipeline, Device, CmdBuffer);
 }
 
-static void RenderFrame(VkDevice Device, FPrimaryCmdBuffer* CmdBuffer, FImage2DWithView* ColorBuffer, FImage2DWithView* DepthBuffer, FImage2DWithView* ResolveColorBuffer)
+static void RenderFrame(VkDevice Device, FCmdBuffer* CmdBuffer, FImage2DWithView* ColorBuffer, FImage2DWithView* DepthBuffer, FImage2DWithView* ResolveColorBuffer)
 {
 	UpdateCamera();
 
@@ -971,7 +970,7 @@ DWORD __stdcall FThread::ThreadFunction(void* Param)
 		}
 
 		VkFormat ColorFormat = (VkFormat)GSwapchain.BACKBUFFER_VIEW_FORMAT;
-		FPrimaryCmdBuffer* ParentCmdBuffer = (FPrimaryCmdBuffer*)This->ParentCmdBuffer;
+		FCmdBuffer* ParentCmdBuffer = (FCmdBuffer*)This->ParentCmdBuffer;
 		auto* CmdBuffer = ThreadMgr.AllocateSecondaryCmdBuffer(ParentCmdBuffer->Fence);
 		CmdBuffer->BeginSecondary(ParentCmdBuffer, This->RenderPass ? This->RenderPass->RenderPass : VK_NULL_HANDLE, This->Framebuffer ? This->Framebuffer->Framebuffer : VK_NULL_HANDLE);
 
@@ -1007,9 +1006,11 @@ void DoRender()
 	}
 
 	GControl = GRequestControl;
-#if ENABLE_VULKAN
-	auto* CmdBuffer = GCmdBufferMgr.GetActivePrimaryCmdBuffer();
+
+	auto* CmdBuffer = GCmdBufferMgr.GetActiveCmdBuffer(GDevice);
+
 	CmdBuffer->Begin();
+#if ENABLE_VULKAN
 
 	auto* SceneColor = GRenderTargetPool.Acquire(GControl.DoMSAA ? "SceneColorMSAA" : "SceneColor", GSwapchain.GetWidth(), GSwapchain.GetHeight(), VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 1, GControl.DoMSAA ? VK_SAMPLE_COUNT_4_BIT : VK_SAMPLE_COUNT_1_BIT);
 
@@ -1086,11 +1087,12 @@ void DoRender()
 	}
 	ImageBarrier(CmdBuffer, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, GSwapchain.GetAcquiredImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_MEMORY_READ_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
 
+#endif
 	CmdBuffer->End();
 
 	// First submit needs to wait for present semaphore
-	GCmdBufferMgr.Submit(CmdBuffer, GDevice.PresentQueue, &GSwapchain.PresentCompleteSemaphores[GSwapchain.PresentCompleteSemaphoreIndex], &GSwapchain.RenderingSemaphores[GSwapchain.AcquiredImageIndex]);
-#endif
+	GCmdBufferMgr.Submit(GDevice, CmdBuffer);//, GDevice.PresentQueue, &GSwapchain.PresentCompleteSemaphores[GSwapchain.PresentCompleteSemaphoreIndex], &GSwapchain.RenderingSemaphores[GSwapchain.AcquiredImageIndex]);
+
 	GSwapchain.Present(GDevice.Queue.Get());
 }
 
@@ -1133,9 +1135,9 @@ void DoDeinit()
 
 	GCheckerboardTexture.Destroy();
 	GHeightMap.Destroy();
-
+#endif
 	GDescriptorPool.Destroy();
-
+#if 0
 	GTestComputePostPSO.Destroy(GDevice.Device);
 	GTestComputePSO.Destroy(GDevice.Device);
 	GTestPSO.Destroy(GDevice.Device);

@@ -239,7 +239,7 @@ struct FStagingBuffer : public FBuffer
 	FCmdBuffer* CmdBuffer = nullptr;
 	uint64 FenceCounter = 0;
 
-	void SetFence(FPrimaryCmdBuffer* InCmdBuffer)
+	void SetFence(FCmdBuffer* InCmdBuffer)
 	{
 		CmdBuffer = InCmdBuffer;
 		FenceCounter = InCmdBuffer->Fence->FenceSignaledCounter;
@@ -696,13 +696,31 @@ struct FBasePipeline
 		PipelineLayout = VK_NULL_HANDLE;
 	}
 };
-
+#endif
 struct FDescriptorPool
 {
-	void Create(VkDevice InDevice)
-	{
-		Device = InDevice;
+	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> RTVHeap;
+	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> CSUHeap;
 
+	void Create(FDevice& InDevice)
+	{
+		D3D12_DESCRIPTOR_HEAP_DESC HeapDesc;
+		MemZero(HeapDesc);
+		HeapDesc.NodeMask = 1;
+		HeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+		{
+			HeapDesc.NumDescriptors = 256;
+			HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+			checkD3D12(InDevice.Device->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&RTVHeap)));
+		}
+
+		{
+			HeapDesc.NumDescriptors = 2048;
+			HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+			checkD3D12(InDevice.Device->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&CSUHeap)));
+		}
+
+#if ENABLE_VULKAN
 		std::vector<VkDescriptorPoolSize> PoolSizes;
 		auto AddPool = [&](VkDescriptorType Type, uint32 NumDescriptors)
 		{
@@ -729,14 +747,20 @@ struct FDescriptorPool
 		Info.poolSizeCount = (uint32)PoolSizes.size();
 		Info.pPoolSizes = &PoolSizes[0];
 		checkVk(vkCreateDescriptorPool(InDevice, &Info, nullptr, &Pool));
+#endif
 	}
 
 	void Destroy()
 	{
+#if ENABLE_VULKAN
 		vkDestroyDescriptorPool(Device, Pool, nullptr);
 		Pool = VK_NULL_HANDLE;
+#endif
+		CSUHeap = nullptr;
+		RTVHeap = nullptr;
 	}
 
+#if ENABLE_VULKAN
 	VkDescriptorSet AllocateDescriptorSet(VkDescriptorSetLayout DSLayout)
 	{
 		VkDescriptorSet DescriptorSet = VK_NULL_HANDLE;
@@ -752,8 +776,10 @@ struct FDescriptorPool
 
 	VkDevice Device = VK_NULL_HANDLE;
 	VkDescriptorPool Pool = VK_NULL_HANDLE;
+#endif
 };
 
+#if ENABLE_VULKAN
 struct FFramebuffer
 {
 	VkFramebuffer Framebuffer = VK_NULL_HANDLE;
@@ -1138,7 +1164,7 @@ struct FSwapchain
 	}
 
 #if ENABLE_VULKAN
-	void ClearAndTransitionToPresent(FPrimaryCmdBuffer* CmdBuffer)
+	void ClearAndTransitionToPresent(FCmdBuffer* CmdBuffer)
 	{
 		VkClearColorValue Color;
 		MemZero(Color);
@@ -1187,7 +1213,7 @@ inline void FlushMappedBuffer(VkDevice Device, FBuffer* Buffer)
 	vkInvalidateMappedMemoryRanges(Device, 1, &Range);
 }
 
-inline void CopyBuffer(FPrimaryCmdBuffer* CmdBuffer, FBuffer* SrcBuffer, FBuffer* DestBuffer)
+inline void CopyBuffer(FCmdBuffer* CmdBuffer, FBuffer* SrcBuffer, FBuffer* DestBuffer)
 {
 	VkBufferCopy Region;
 	MemZero(Region);
@@ -1198,7 +1224,7 @@ inline void CopyBuffer(FPrimaryCmdBuffer* CmdBuffer, FBuffer* SrcBuffer, FBuffer
 }
 
 template <typename TFillLambda>
-inline void MapAndFillBufferSync(FStagingBuffer* StagingBuffer, FPrimaryCmdBuffer* CmdBuffer, FBuffer* DestBuffer, TFillLambda Fill, uint32 Size)
+inline void MapAndFillBufferSync(FStagingBuffer* StagingBuffer, FCmdBuffer* CmdBuffer, FBuffer* DestBuffer, TFillLambda Fill, uint32 Size)
 {
 	void* Data = StagingBuffer->GetMappedData();
 	check(Data);
@@ -1209,7 +1235,7 @@ inline void MapAndFillBufferSync(FStagingBuffer* StagingBuffer, FPrimaryCmdBuffe
 }
 
 template <typename TFillLambda>
-inline void MapAndFillImageSync(FStagingBuffer* StagingBuffer, FPrimaryCmdBuffer* CmdBuffer, FImage* DestImage, TFillLambda Fill)
+inline void MapAndFillImageSync(FStagingBuffer* StagingBuffer, FCmdBuffer* CmdBuffer, FImage* DestImage, TFillLambda Fill)
 {
 	void* Data = StagingBuffer->GetMappedData();
 	check(Data);
@@ -1232,9 +1258,9 @@ inline void MapAndFillImageSync(FStagingBuffer* StagingBuffer, FPrimaryCmdBuffer
 	StagingBuffer->SetFence(CmdBuffer);
 }
 
-inline void CopyColorImage(FPrimaryCmdBuffer* CmdBuffer, uint32 Width, uint32 Height, VkImage SrcImage, VkImageLayout SrcCurrentLayout, VkImage DstImage, VkImageLayout DstCurrentLayout)
+inline void CopyColorImage(FCmdBuffer* CmdBuffer, uint32 Width, uint32 Height, VkImage SrcImage, VkImageLayout SrcCurrentLayout, VkImage DstImage, VkImageLayout DstCurrentLayout)
 {
-	check(CmdBuffer->State == FPrimaryCmdBuffer::EState::Begun);
+	check(CmdBuffer->State == FCmdBuffer::EState::Begun);
 	VkImageCopy CopyRegion;
 	MemZero(CopyRegion);
 	CopyRegion.extent.width = Width;
@@ -1255,9 +1281,9 @@ inline void CopyColorImage(FPrimaryCmdBuffer* CmdBuffer, uint32 Width, uint32 He
 	vkCmdCopyImage(CmdBuffer->CmdBuffer, SrcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, DstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &CopyRegion);
 };
 
-inline void BlitColorImage(FPrimaryCmdBuffer* CmdBuffer, uint32 Width, uint32 Height, VkImage SrcImage, VkImageLayout SrcCurrentLayout, VkImage DstImage, VkImageLayout DstCurrentLayout)
+inline void BlitColorImage(FCmdBuffer* CmdBuffer, uint32 Width, uint32 Height, VkImage SrcImage, VkImageLayout SrcCurrentLayout, VkImage DstImage, VkImageLayout DstCurrentLayout)
 {
-	check(CmdBuffer->State == FPrimaryCmdBuffer::EState::Begun);
+	check(CmdBuffer->State == FCmdBuffer::EState::Begun);
 	VkImageBlit BlitRegion;
 	MemZero(BlitRegion);
 	BlitRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
