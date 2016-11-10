@@ -13,7 +13,7 @@ typedef int64_t int64;
 
 #define check(x) if (!(x)) __debugbreak();
 
-#define checkVk(r) check((r) == VK_SUCCESS)
+#define checkD3D12(r) check(SUCCEEDED(r))
 
 
 template <typename T>

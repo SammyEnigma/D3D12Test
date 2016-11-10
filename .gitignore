@@ -10,6 +10,7 @@
 vc*.idb
 *.user
 *.suo
+Test0.res
 x64
 
 # Windows image file caches

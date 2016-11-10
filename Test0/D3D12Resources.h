@@ -1063,18 +1063,20 @@ inline void BufferBarrier(FCmdBuffer* CmdBuffer, VkPipelineStageFlags SrcStage, 
 {
 	BufferBarrier(CmdBuffer, SrcStage, DestStage, Buffer->Buffer, Buffer->GetBindOffset(), Buffer->GetSize(), SrcMask, DstMask);
 }
-
+#endif
 struct FSwapchain
 {
+	Microsoft::WRL::ComPtr<IDXGISwapChain1> Swapchain;
+#if ENABLE_VULKAN
 	enum
 	{
 		SWAPCHAIN_IMAGE_FORMAT = VK_FORMAT_B8G8R8A8_UNORM,
 		BACKBUFFER_VIEW_FORMAT = VK_FORMAT_R8G8B8A8_UNORM,
 	};
+#endif
+	void Create(IDXGIFactory4* DXGI, HWND Hwnd, FDevice& Device, uint32& WindowWidth, uint32& WindowHeight);
 
-	void Create(VkSurfaceKHR SurfaceKHR, VkPhysicalDevice PhysicalDevice, VkDevice InDevice, VkSurfaceKHR Surface, uint32& WindowWidth, uint32& WindowHeight);
-
-	VkSwapchainKHR Swapchain = VK_NULL_HANDLE;
+#if ENABLE_VULKAN
 	std::vector<VkImage> Images;
 	std::vector<FImageView> ImageViews;
 	VkDevice Device = VK_NULL_HANDLE;
@@ -1095,9 +1097,11 @@ struct FSwapchain
 	{
 		return ImageViews[AcquiredImageIndex].ImageView;
 	}
+#endif
 
 	void Destroy()
 	{
+#if ENABLE_VULKAN
 		for (auto& RS : RenderingSemaphores)
 		{
 			RS.Destroy(Device);
@@ -1113,10 +1117,11 @@ struct FSwapchain
 			ImageView.Destroy();
 		}
 
-		vkDestroySwapchainKHR(Device, Swapchain, nullptr);
-		Swapchain = VK_NULL_HANDLE;
+#endif
+		Swapchain = nullptr;
 	}
 
+#if ENABLE_VULKAN
 	inline uint32 GetWidth() const
 	{
 		return SurfaceResolution.width;
@@ -1175,9 +1180,10 @@ struct FSwapchain
 		Info.pImageIndices = &AcquiredImageIndex;
 		checkVk(vkQueuePresentKHR(PresentQueue, &Info));
 	}
+#endif
 };
 
-
+#if ENABLE_VULKAN
 inline void FlushMappedBuffer(VkDevice Device, FBuffer* Buffer)
 {
 	VkMappedMemoryRange Range;

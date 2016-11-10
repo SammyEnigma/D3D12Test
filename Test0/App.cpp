@@ -29,11 +29,11 @@ FControl GControl;
 FVector4 GCameraPos = {0, 0, -10, 1};
 
 static FInstance GInstance;
-#if ENABLE_VULKAN
 static FDevice GDevice;
+static FSwapchain GSwapchain;
+#if ENABLE_VULKAN
 static FMemManager GMemMgr;
 static FCmdBufferMgr GCmdBufferMgr;
-static FSwapchain GSwapchain;
 static FDescriptorPool GDescriptorPool;
 static FStagingManager GStagingManager;
 
@@ -316,38 +316,30 @@ struct FSetupFloorPSO : public FComputePSO
 	}
 };
 static FSetupFloorPSO GSetupFloorPSO;
-
+#endif
 
 void FInstance::CreateDevice(FDevice& OutDevice)
 {
-	uint32 NumDevices;
-	checkVk(vkEnumeratePhysicalDevices(Instance, &NumDevices, nullptr));
-	std::vector<VkPhysicalDevice> Devices;
-	Devices.resize(NumDevices);
-	checkVk(vkEnumeratePhysicalDevices(Instance, &NumDevices, &Devices[0]));
-
-	for (uint32 Index = 0; Index < NumDevices; ++Index)
+	std::vector<Microsoft::WRL::ComPtr<IDXGIAdapter1>> Adapters;
+	uint32 NumAdapters = 0;
 	{
-		VkPhysicalDeviceProperties DeviceProperties;
-		vkGetPhysicalDeviceProperties(Devices[Index], &DeviceProperties);
-
-		uint32 NumQueueFamilies;
-		vkGetPhysicalDeviceQueueFamilyProperties(Devices[Index], &NumQueueFamilies, nullptr);
-		std::vector<VkQueueFamilyProperties> QueueFamilies;
-		QueueFamilies.resize(NumQueueFamilies);
-		vkGetPhysicalDeviceQueueFamilyProperties(Devices[Index], &NumQueueFamilies, &QueueFamilies[0]);
-
-		for (uint32 QueueIndex = 0; QueueIndex < NumQueueFamilies; ++QueueIndex)
+		Microsoft::WRL::ComPtr<IDXGIAdapter1> CurrentAdapter;
+		while (DXGIFactory->EnumAdapters1(NumAdapters, &CurrentAdapter) != DXGI_ERROR_NOT_FOUND)
 		{
-			VkBool32 bSupportsPresent;
-			checkVk(vkGetPhysicalDeviceSurfaceSupportKHR(Devices[Index], QueueIndex, Surface, &bSupportsPresent));
-			if (bSupportsPresent && QueueFamilies[QueueIndex].queueFlags & VK_QUEUE_GRAPHICS_BIT)
-			{
-				OutDevice.PhysicalDevice = Devices[Index];
-				OutDevice.DeviceProperties = DeviceProperties;
-				OutDevice.PresentQueueFamilyIndex = QueueIndex;
-				goto Found;
-			}
+			Adapters.push_back(CurrentAdapter);
+			++NumAdapters;
+		}
+	}
+
+	check(NumAdapters > 0);
+	for (uint32 Index = 0; Index < NumAdapters; ++Index)
+	{
+		DXGI_ADAPTER_DESC1 Desc;
+		checkD3D12(Adapters[Index]->GetDesc1(&Desc));
+		if (Desc.DedicatedVideoMemory > 0)
+		{
+			OutDevice.Adapter = Adapters[Index];
+			goto Found;
 		}
 	}
 
@@ -356,8 +348,10 @@ void FInstance::CreateDevice(FDevice& OutDevice)
 	return;
 
 Found:
-	OutDevice.Create(Layers);
+	OutDevice.Create();
 }
+
+#if ENABLE_VULKAN
 
 struct FObjectCache
 {
@@ -773,10 +767,10 @@ bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 	}
 
 	GInstance.Create(hInstance, hWnd);
-#if ENABLE_VULKAN
 	GInstance.CreateDevice(GDevice);
+	GSwapchain.Create(GInstance.DXGIFactory.Get(), hWnd, GDevice, Width, Height);
 
-	GSwapchain.Create(GInstance.Surface, GDevice.PhysicalDevice, GDevice.Device, GInstance.Surface, Width, Height);
+#if ENABLE_VULKAN
 
 	GCmdBufferMgr.Create(GDevice.Device, GDevice.PresentQueueFamilyIndex);
 
@@ -1154,12 +1148,12 @@ void DoDeinit()
 
 	GRenderTargetPool.Destroy();
 
-	GSwapchain.Destroy();
 	GStagingManager.Destroy();
 	GObjectCache.Destroy();
 	GCmdBufferMgr.Destroy();
 	GMemMgr.Destroy();
-	GDevice.Destroy();
 #endif
+	GSwapchain.Destroy();
+	GDevice.Destroy();
 	GInstance.Destroy();
 }
