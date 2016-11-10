@@ -4,6 +4,7 @@
 *.db
 *.opendb
 *.ilk
+*.ipch
 *.pch
 *.exe
 vc*.idb

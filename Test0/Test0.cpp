@@ -3,8 +3,8 @@
 
 #include "stdafx.h"
 
-#define ENABLE_VULKAN	0
-
+#include "Util.h"
+#include "App.h"
 #include "Test0.h"
 
 #if ENABLE_VULKAN
@@ -115,14 +115,13 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    RECT Rect;
    GetWindowRect(hWnd, &Rect);
 
-#if ENABLE_VULKAN
    uint32 Width = Rect.right - Rect.left;
    uint32 Height = Rect.bottom - Rect.top;
    if (!DoInit(hInstance, hWnd, Width, Height))
    {
 	   check(0);
    }
-#endif
+
    ShowWindow(hWnd, nCmdShow);
    UpdateWindow(hWnd);
 
@@ -165,9 +164,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
 			if (!bDestroyed)
 			{
-#if ENABLE_VULKAN
 				DoRender();
-#endif
 			}
             //PAINTSTRUCT ps;
             //HDC hdc = BeginPaint(hWnd, &ps);
@@ -175,8 +172,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             //EndPaint(hWnd, &ps);
         }
         break;
-#if ENABLE_VULKAN
-    case WM_SIZE:
+
+	case WM_SIZE:
 		// Resize the application to the new window size, except when
 		// it was minimized. Vulkan doesn't support images or swapchains
 		// with width=0 and height=0.
@@ -240,12 +237,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			}
 		}
 		break;
-#endif
 	case WM_DESTROY:
 		bDestroyed = true;
-#if ENABLE_VULKAN
 		DoDeinit();
-#endif
         PostQuitMessage(0);
         break;
     default:
