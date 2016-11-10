@@ -2,9 +2,10 @@
 
 #include "stdafx.h"
 #include "App.h"
+#include "D3D12Mem.h"
+#include "D3D12Device.h"
+#include "D3D12Resources.h"
 #if ENABLE_VULKAN
-#include "VkMem.h"
-#include "VkResources.h"
 #include "../Meshes/ObjLoader.h"
 
 // 0 no multithreading
@@ -27,8 +28,8 @@ FControl GControl;
 
 FVector4 GCameraPos = {0, 0, -10, 1};
 
-#if ENABLE_VULKAN
 static FInstance GInstance;
+#if ENABLE_VULKAN
 static FDevice GDevice;
 static FMemManager GMemMgr;
 static FCmdBufferMgr GCmdBufferMgr;
@@ -771,8 +772,8 @@ bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 		}
 	}
 
-#if ENABLE_VULKAN
 	GInstance.Create(hInstance, hWnd);
+#if ENABLE_VULKAN
 	GInstance.CreateDevice(GDevice);
 
 	GSwapchain.Create(GInstance.Surface, GDevice.PhysicalDevice, GDevice.Device, GInstance.Surface, Width, Height);
@@ -1159,6 +1160,6 @@ void DoDeinit()
 	GCmdBufferMgr.Destroy();
 	GMemMgr.Destroy();
 	GDevice.Destroy();
-	GInstance.Destroy();
 #endif
+	GInstance.Destroy();
 }

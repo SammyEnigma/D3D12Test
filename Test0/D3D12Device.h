@@ -8,9 +8,11 @@
 #include <vulkan/vulkan.h>
 
 #include "../Utils/Util.h"
+#endif
 
 struct FInstance
 {
+#if ENABLE_VULKAN
 	VkSurfaceKHR Surface = VK_NULL_HANDLE;
 	VkInstance Instance = VK_NULL_HANDLE;
 	VkDebugReportCallbackEXT DebugReportCB = VK_NULL_HANDLE;
@@ -18,9 +20,10 @@ struct FInstance
 	std::vector<const char*> Layers;
 
 	void GetInstanceLayersAndExtensions(std::vector<const char*>& OutLayers, std::vector<const char*>& OutExtensions);
-
+#endif
 	void CreateInstance()
 	{
+#if ENABLE_VULKAN
 		VkApplicationInfo AppInfo;
 		MemZero(AppInfo);
 		AppInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -46,14 +49,18 @@ struct FInstance
 		checkVk(vkCreateInstance(&InstanceInfo, nullptr, &Instance));
 
 		Layers = InstanceLayers;
+#endif
 	}
 
 	void DestroyInstance()
 	{
+#if ENABLE_VULKAN
 		vkDestroyInstance(Instance, nullptr);
 		Instance = VK_NULL_HANDLE;
+#endif
 	}
 
+#if ENABLE_VULKAN
 	void CreateSurface(HINSTANCE hInstance, HWND hWnd)
 	{
 		VkWin32SurfaceCreateInfoKHR SurfaceInfo;
@@ -102,24 +109,28 @@ struct FInstance
 			(*DestroyCB)(Instance, DebugReportCB, nullptr);
 		}
 	}
-
+#endif
 	void Create(HINSTANCE hInstance, HWND hWnd)
 	{
 		CreateInstance();
+#if ENABLE_VULKAN
 		CreateDebugCallback();
 		CreateSurface(hInstance, hWnd);
+#endif
 	}
 
 	void CreateDevice(struct FDevice& OutDevice);
 
 	void Destroy()
 	{
+#if ENABLE_VULKAN
 		DestroySurface();
 		DestroyDebugCallback();
 		DestroyInstance();
 	}
 };
 
+#if ENABLE_VULKAN
 struct FDevice
 {
 	VkPhysicalDevice PhysicalDevice = VK_NULL_HANDLE;
