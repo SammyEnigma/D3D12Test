@@ -9,6 +9,7 @@
 *.exe
 vc*.idb
 *.user
+*.suo
 x64
 
 # Windows image file caches
