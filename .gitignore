@@ -1,3 +1,15 @@
+*.tlog
+*.pdb
+*.obj
+*.db
+*.opendb
+*.ilk
+*.pch
+*.exe
+vc*.idb
+*.user
+x64
+
 # Windows image file caches
 Thumbs.db
 ehthumbs.db
