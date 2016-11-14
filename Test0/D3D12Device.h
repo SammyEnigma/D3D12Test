@@ -8,18 +8,8 @@
 #include <wrl.h>
 #include <d3dcompiler.h>
 
-#if ENABLE_VULKAN
-
-#define VK_USE_PLATFORM_WIN32_KHR
-#include <vulkan/vulkan.h>
-
-#endif
-
 struct FInstance
 {
-#if ENABLE_VULKAN
-	VkSurfaceKHR Surface = VK_NULL_HANDLE;
-#endif
 	void CreateInstance()
 	{
 		SetupDebugLayer();
@@ -35,38 +25,15 @@ struct FInstance
 		DXGIFactory = nullptr;
 	}
 
-#if ENABLE_VULKAN
-	void CreateSurface(HINSTANCE hInstance, HWND hWnd)
-	{
-		VkWin32SurfaceCreateInfoKHR SurfaceInfo;
-		MemZero(SurfaceInfo);
-		SurfaceInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
-		SurfaceInfo.hinstance = hInstance;
-		SurfaceInfo.hwnd = hWnd;
-		checkVk(vkCreateWin32SurfaceKHR(Instance, &SurfaceInfo, nullptr, &Surface));
-	}
-
-	void DestroySurface()
-	{
-		vkDestroySurfaceKHR(Instance, Surface, nullptr);
-		Surface = VK_NULL_HANDLE;
-	}
-#endif
 	void Create(HINSTANCE hInstance, HWND hWnd)
 	{
 		CreateInstance();
-#if ENABLE_VULKAN
-		CreateSurface(hInstance, hWnd);
-#endif
 	}
 
 	void CreateDevice(struct FDevice& OutDevice);
 
 	void Destroy()
 	{
-#if ENABLE_VULKAN
-		DestroySurface();
-#endif
 		DestroyInstance();
 	}
 
@@ -134,6 +101,7 @@ struct FFence
 	void Wait(uint64 TimeInNanoseconds = 0xffffffff)
 	{
 		check(State == EState::NotSignaled);
+		check(0);
 #if ENABLE_VULKAN
 		checkVk(vkWaitForFences(Device, 1, &Fence, true, TimeInNanoseconds));
 #endif
@@ -163,6 +131,7 @@ struct FFence
 struct FCmdBuffer
 {
 	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> CommandList;
+	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> Allocator;
 
 	enum class EState
 	{
@@ -174,24 +143,21 @@ struct FCmdBuffer
 	};
 	EState State = EState::ReadyForBegin;
 
-	void Destroy(ID3D12CommandAllocator* Allocator)
+	void Destroy()
 	{
 		if (State == EState::Submitted)
 		{
-			RefreshState(Allocator);
+			RefreshState();
 			if (Fence.IsNotSignaled())
 			{
 				const uint64 TimeToWaitInNanoseconds = 5;
 				Fence.Wait(TimeToWaitInNanoseconds);
 			}
-			RefreshState(Allocator);
+			RefreshState();
 		}
-#if ENABLE_VULKAN
-		vkFreeCommandBuffers(Device, Pool, 1, &CmdBuffer);
-		CmdBuffer = VK_NULL_HANDLE;
-#endif
 		Fence.Destroy();
 		CommandList = nullptr;
+		Allocator = nullptr;
 	}
 
 #if ENABLE_VULKAN
@@ -205,7 +171,7 @@ struct FCmdBuffer
 
 		State = EState::Begun;
 	}
-
+#endif
 	void WaitForFence()
 	{
 		if (State == EState::Submitted)
@@ -214,8 +180,8 @@ struct FCmdBuffer
 			RefreshState();
 		}
 	}
-#endif
-	void RefreshState(ID3D12CommandAllocator* Allocator)
+
+	void RefreshState()
 	{
 		if (State == EState::Submitted)
 		{
@@ -223,7 +189,7 @@ struct FCmdBuffer
 			Fence.RefreshState();
 			if (PrevCounter != Fence.FenceSignaledCounter)
 			{
-				checkD3D12(CommandList->Reset(Allocator, nullptr));
+				checkD3D12(CommandList->Reset(Allocator.Get(), nullptr));
 				State = EState::ReadyForBegin;
 			}
 		}
@@ -238,9 +204,10 @@ struct FCmdBuffer
 
 	FFence Fence;
 
-	void Create(FDevice& InDevice, ID3D12CommandAllocator* Allocator)
+	void Create(FDevice& InDevice)
 	{
-		checkD3D12(InDevice.Device->CreateCommandList(1, D3D12_COMMAND_LIST_TYPE_DIRECT, Allocator, nullptr, _uuidof(ID3D12GraphicsCommandList), &CommandList));
+		checkD3D12(InDevice.Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, __uuidof(ID3D12CommandAllocator), &Allocator));
+		checkD3D12(InDevice.Device->CreateCommandList(1, D3D12_COMMAND_LIST_TYPE_DIRECT, Allocator.Get(), nullptr, _uuidof(ID3D12GraphicsCommandList), &CommandList));
 		Fence.Create(InDevice);
 	}
 
@@ -294,43 +261,26 @@ struct FSemaphore
 
 struct FCmdBufferMgr
 {
-	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> Allocator;
-
 	void Create(FDevice& Device)
 	{
-		checkD3D12(Device.Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, __uuidof(ID3D12CommandAllocator), &Allocator));
-#if ENABLE_VULKAN
-		VkCommandPoolCreateInfo PoolInfo;
-		MemZero(PoolInfo);
-		PoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-		PoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-		PoolInfo.queueFamilyIndex = QueueFamilyIndex;
-
-		checkVk(vkCreateCommandPool(Device, &PoolInfo, nullptr, &Pool));
-#endif
 	}
 
 	void Destroy()
 	{
 		for (auto* CB : CmdBuffers)
 		{
-			CB->RefreshState(Allocator.Get());
-			CB->Destroy(Allocator.Get());
+			CB->RefreshState();
+			CB->Destroy();
 			delete CB;
 		}
 		CmdBuffers.clear();
-
-#if ENABLE_VULKAN
-		vkDestroyCommandPool(Device, Pool, nullptr);
-		Pool = VK_NULL_HANDLE;
-#endif
 	}
 
 	FCmdBuffer* AllocateCmdBuffer(FDevice& Device)
 	{
 		for (auto* CmdBuffer : CmdBuffers)
 		{
-			CmdBuffer->RefreshState(Allocator.Get());
+			CmdBuffer->RefreshState();
 			if (CmdBuffer->State == FCmdBuffer::EState::ReadyForBegin)
 			{
 				return CmdBuffer;
@@ -338,7 +288,7 @@ struct FCmdBufferMgr
 		}
 
 		auto* NewCmdBuffer = new FCmdBuffer;
-		NewCmdBuffer->Create(Device, Allocator.Get());
+		NewCmdBuffer->Create(Device);
 		CmdBuffers.push_back(NewCmdBuffer);
 		return NewCmdBuffer;
 	}
@@ -350,7 +300,7 @@ struct FCmdBufferMgr
 			switch (CB->State)
 			{
 			case FCmdBuffer::EState::Submitted:
-				CB->RefreshState(Allocator.Get());
+				CB->RefreshState();
 				break;
 			case FCmdBuffer::EState::ReadyForBegin:
 				return CB;
@@ -377,7 +327,7 @@ struct FCmdBufferMgr
 	{
 		for (auto* CmdBuffer : CmdBuffers)
 		{
-			CmdBuffer->RefreshState(Allocator.Get());
+			CmdBuffer->RefreshState();
 		}
 	}
 
