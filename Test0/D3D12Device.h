@@ -105,12 +105,11 @@ struct FDevice
 	}
 };
 
-#if ENABLE_VULKAN
 struct FFence
 {
-	VkFence Fence = VK_NULL_HANDLE;
+	Microsoft::WRL::ComPtr<ID3D12Fence> Fence;
+	HANDLE Event = nullptr;
 	uint64 FenceSignaledCounter = 0;
-	VkDevice Device = VK_NULL_HANDLE;
 
 	enum EState
 	{
@@ -119,26 +118,25 @@ struct FFence
 	};
 	EState State = EState::NotSignaled;
 
-	void Create(VkDevice InDevice)
+	void Create(FDevice& InDevice)
 	{
-		Device = InDevice;
-
-		VkFenceCreateInfo Info;
-		MemZero(Info);
-		Info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-		checkVk(vkCreateFence(Device, &Info, nullptr, &Fence));
+		checkD3D12(InDevice.Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), &Fence));
+		Event = CreateEventEx(nullptr, false, false, EVENT_ALL_ACCESS);
+		check(Event != nullptr);
+		FenceSignaledCounter = 1;
 	}
 
-	void Destroy(VkDevice Device)
+	void Destroy()
 	{
-		vkDestroyFence(Device, Fence, nullptr);
-		Fence = VK_NULL_HANDLE;
+		Fence = nullptr;
 	}
 
 	void Wait(uint64 TimeInNanoseconds = 0xffffffff)
 	{
 		check(State == EState::NotSignaled);
+#if ENABLE_VULKAN
 		checkVk(vkWaitForFences(Device, 1, &Fence, true, TimeInNanoseconds));
+#endif
 		RefreshState();
 	}
 
@@ -151,31 +149,21 @@ struct FFence
 	{
 		if (State == EState::NotSignaled)
 		{
-			VkResult Result = vkGetFenceStatus(Device, Fence);
-			switch (Result)
+			auto CompletedValue = Fence->GetCompletedValue();
+			if (CompletedValue > FenceSignaledCounter)
 			{
-			case VK_SUCCESS:
+				check(CompletedValue == FenceSignaledCounter + 1);
 				++FenceSignaledCounter;
 				State = EState::Signaled;
-				checkVk(vkResetFences(Device, 1, &Fence));
-				break;
-			case VK_NOT_READY:
-				break;
-			default:
-				checkVk(Result);
-				break;
 			}
 		}
 	}
 };
-#endif
 
 struct FCmdBuffer
 {
-	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList > CommandList;
-#if ENABLE_VULKAN
-	FFence* Fence = nullptr;
-#endif
+	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> CommandList;
+
 	enum class EState
 	{
 		ReadyForBegin,
@@ -186,23 +174,23 @@ struct FCmdBuffer
 	};
 	EState State = EState::ReadyForBegin;
 
-	virtual void Destroy()
+	void Destroy(ID3D12CommandAllocator* Allocator)
 	{
-#if ENABLE_VULKAN
 		if (State == EState::Submitted)
 		{
-			RefreshState();
-			if (Fence->IsNotSignaled())
+			RefreshState(Allocator);
+			if (Fence.IsNotSignaled())
 			{
 				const uint64 TimeToWaitInNanoseconds = 5;
-				Fence->Wait(TimeToWaitInNanoseconds);
+				Fence.Wait(TimeToWaitInNanoseconds);
 			}
-			RefreshState();
+			RefreshState(Allocator);
 		}
+#if ENABLE_VULKAN
 		vkFreeCommandBuffers(Device, Pool, 1, &CmdBuffer);
 		CmdBuffer = VK_NULL_HANDLE;
-		Fence->Destroy(Device);
 #endif
+		Fence.Destroy();
 		CommandList = nullptr;
 	}
 
@@ -222,41 +210,38 @@ struct FCmdBuffer
 	{
 		if (State == EState::Submitted)
 		{
-			Fence->Wait();
+			Fence.Wait();
 			RefreshState();
 		}
 	}
 #endif
-	void RefreshState()
+	void RefreshState(ID3D12CommandAllocator* Allocator)
 	{
-#if ENABLE_VULKAN
 		if (State == EState::Submitted)
 		{
-			uint64 PrevCounter = Fence->FenceSignaledCounter;
-			Fence->RefreshState();
-			if (PrevCounter != Fence->FenceSignaledCounter)
+			uint64 PrevCounter = Fence.FenceSignaledCounter;
+			Fence.RefreshState();
+			if (PrevCounter != Fence.FenceSignaledCounter)
 			{
-				CommandList->Reset();
+				checkD3D12(CommandList->Reset(Allocator, nullptr));
 				State = EState::ReadyForBegin;
 			}
 		}
-#endif
 	}
 
 	void End()
 	{
 		check(State == EState::Begun);
-		CommandList->Close();
+		checkD3D12(CommandList->Close());
 		State = EState::Ended;
 	}
 
-#if ENABLE_VULKAN
-	FFence PrimaryFence;
-#endif
+	FFence Fence;
 
 	void Create(FDevice& InDevice, ID3D12CommandAllocator* Allocator)
 	{
 		checkD3D12(InDevice.Device->CreateCommandList(1, D3D12_COMMAND_LIST_TYPE_DIRECT, Allocator, nullptr, _uuidof(ID3D12GraphicsCommandList), &CommandList));
+		Fence.Create(InDevice);
 	}
 
 	void Begin()
@@ -327,23 +312,15 @@ struct FCmdBufferMgr
 
 	void Destroy()
 	{
-#if ENABLE_VULKAN
 		for (auto* CB : CmdBuffers)
 		{
-			CB->RefreshState();
-			CB->Destroy(Device, Pool);
+			CB->RefreshState(Allocator.Get());
+			CB->Destroy(Allocator.Get());
 			delete CB;
 		}
 		CmdBuffers.clear();
 
-		for (auto* CB : SecondaryCmdBuffers)
-		{
-			CB->RefreshState();
-			CB->Destroy(Device, Pool);
-			delete CB;
-		}
-		SecondaryCmdBuffers.clear();
-
+#if ENABLE_VULKAN
 		vkDestroyCommandPool(Device, Pool, nullptr);
 		Pool = VK_NULL_HANDLE;
 #endif
@@ -353,7 +330,7 @@ struct FCmdBufferMgr
 	{
 		for (auto* CmdBuffer : CmdBuffers)
 		{
-			CmdBuffer->RefreshState();
+			CmdBuffer->RefreshState(Allocator.Get());
 			if (CmdBuffer->State == FCmdBuffer::EState::ReadyForBegin)
 			{
 				return CmdBuffer;
@@ -373,7 +350,7 @@ struct FCmdBufferMgr
 			switch (CB->State)
 			{
 			case FCmdBuffer::EState::Submitted:
-				CB->RefreshState();
+				CB->RefreshState(Allocator.Get());
 				break;
 			case FCmdBuffer::EState::ReadyForBegin:
 				return CB;
@@ -388,33 +365,11 @@ struct FCmdBufferMgr
 	void Submit(FDevice& Device, FCmdBuffer* CmdBuffer/*, VkQueue Queue, FSemaphore* WaitSemaphore, FSemaphore* SignaledSemaphore*/)
 	{
 		check(CmdBuffer->State == FCmdBuffer::EState::Ended);
-#if ENABLE_VULKAN
-		check(CmdBuffer->Secondary.empty());
-		VkPipelineStageFlags StageMask[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-		VkSubmitInfo Info;
-		MemZero(Info);
-		Info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-		Info.pWaitDstStageMask = StageMask;
-		Info.commandBufferCount = 1;
-		Info.pCommandBuffers = &CmdBuffer->CmdBuffer;
-		if (WaitSemaphore)
-		{
-			Info.waitSemaphoreCount = 1;
-			Info.pWaitSemaphores = &WaitSemaphore->Semaphore;
-		}
-		if (SignaledSemaphore)
-		{
-			Info.signalSemaphoreCount = 1;
-			Info.pSignalSemaphores = &SignaledSemaphore->Semaphore;
-		}
-		checkVk(vkQueueSubmit(Queue, 1, &Info, CmdBuffer->Fence->Fence));
-#endif
 		ID3D12CommandList* CmdList = CmdBuffer->CommandList.Get();
 		Device.Queue->ExecuteCommandLists(1, &CmdList);
-#if ENABLE_VULKAN
-		CmdBuffer->Fence->State = FFence::EState::NotSignaled;
+		checkD3D12(Device.Queue->Signal(CmdBuffer->Fence.Fence.Get(), CmdBuffer->Fence.FenceSignaledCounter + 1));
+		CmdBuffer->Fence.State = FFence::EState::NotSignaled;
 		CmdBuffer->State = FCmdBuffer::EState::Submitted;
-#endif
 		Update();
 	}
 
@@ -422,7 +377,7 @@ struct FCmdBufferMgr
 	{
 		for (auto* CmdBuffer : CmdBuffers)
 		{
-			CmdBuffer->RefreshState();
+			CmdBuffer->RefreshState(Allocator.Get());
 		}
 	}
 

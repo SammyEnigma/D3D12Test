@@ -1149,6 +1149,10 @@ struct FSwapchain
 		}
 
 #endif
+		//Swapchain1->Release();
+		Swapchain1 = nullptr;
+		Swapchain->SetFullscreenState(false, NULL);
+		//Swapchain->Release();
 		Swapchain = nullptr;
 	}
 
