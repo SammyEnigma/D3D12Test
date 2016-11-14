@@ -102,7 +102,7 @@ struct FFence
 	{
 		while (State == EState::NotSignaled)
 		{
-			::Sleep((TimeInNanoseconds + 1000) / 1000);
+			::Sleep(((uint32)TimeInNanoseconds + 1000) / 1000);
 			RefreshState();
 		}
 #if ENABLE_VULKAN

@@ -1162,24 +1162,7 @@ struct FSwapchain
 		return Height;
 	}
 
-#if ENABLE_VULKAN
-	void ClearAndTransitionToPresent(FCmdBuffer* CmdBuffer)
-	{
-		VkClearColorValue Color;
-		MemZero(Color);
-		VkImageSubresourceRange Range;
-		MemZero(Range);
-		Range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		Range.levelCount = 1;
-		Range.layerCount = 1;
-		for (uint32 Index = 0; Index < (uint32)Images.size(); ++Index)
-		{
-			ImageBarrier(CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, Images[Index], VK_IMAGE_LAYOUT_UNDEFINED, 0, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
-			vkCmdClearColorImage(CmdBuffer->CmdBuffer, Images[Index], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &Color, 1, &Range);
-			ImageBarrier(CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, Images[Index], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_MEMORY_READ_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
-		}
-	}
-#endif
+	void ClearAndTransitionToPresent(FDevice& Device, FCmdBuffer* CmdBuffer, struct FDescriptorPool* DescriptorPool);
 
 	void Present(ID3D12CommandQueue* Queue)
 	{

@@ -803,16 +803,16 @@ bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 
 	GSampler.Create(GDevice.Device);
 	SetupFloor();
+#endif
 	{
 		// Setup on Present layout
 		auto* CmdBuffer = GCmdBufferMgr.AllocateCmdBuffer(GDevice);
 		CmdBuffer->Begin();
-		GSwapchain.ClearAndTransitionToPresent(CmdBuffer);
+		GSwapchain.ClearAndTransitionToPresent(GDevice, CmdBuffer, &GDescriptorPool);
 		CmdBuffer->End();
 		GCmdBufferMgr.Submit(GDevice, CmdBuffer);//, GDevice.PresentQueue, nullptr, nullptr);
 		CmdBuffer->WaitForFence();
 	}
-#endif
 
 #if TRY_MULTITHREADED
 	GThread.Create();

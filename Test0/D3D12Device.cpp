@@ -440,3 +440,33 @@ void FCmdBuffer::BeginRenderPass(VkRenderPass RenderPass, const FFramebuffer& Fr
 	State = EState::InsideRenderPass;
 }
 #endif
+
+void FSwapchain::ClearAndTransitionToPresent(FDevice& Device, FCmdBuffer* CmdBuffer, FDescriptorPool* DescriptorPool)
+{
+#if ENABLE_VULKAN
+	VkClearColorValue Color;
+	MemZero(Color);
+	VkImageSubresourceRange Range;
+	MemZero(Range);
+	Range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	Range.levelCount = 1;
+	Range.layerCount = 1;
+#endif
+	for (uint32 Index = 0; Index < (uint32)Images.size(); ++Index)
+	{
+		ResourceBarrier(CmdBuffer, Images[Index].Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_RENDER_TARGET);
+#if ENABLE_VULKAN
+		ImageBarrier(CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, Images[Index], VK_IMAGE_LAYOUT_UNDEFINED, 0, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+		vkCmdClearColorImage(CmdBuffer->CmdBuffer, Images[Index], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &Color, 1, &Range);
+		ImageBarrier(CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, Images[Index], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_MEMORY_READ_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+#endif
+		D3D12_CPU_DESCRIPTOR_HANDLE RTView = DescriptorPool->RTVHeap->GetCPUDescriptorHandleForHeapStart();
+		uint32 DescSize = Device.Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+
+		Device.Device->CreateRenderTargetView(Images[Index].Get(), nullptr, RTView);
+
+		CmdBuffer->CommandList->OMSetRenderTargets(1, &RTView, false, nullptr);
+		float Color[4] = {1, 0, 0, 1};
+		CmdBuffer->CommandList->ClearRenderTargetView(RTView, Color, 0, nullptr);
+	}
+}
