@@ -803,20 +803,19 @@ bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 
 	GSampler.Create(GDevice.Device);
 	SetupFloor();
-
 	{
 		// Setup on Present layout
-		auto* CmdBuffer = GCmdBufferMgr.AllocateCmdBuffer();
+		auto* CmdBuffer = GCmdBufferMgr.AllocateCmdBuffer(GDevice);
 		CmdBuffer->Begin();
 		GSwapchain.ClearAndTransitionToPresent(CmdBuffer);
 		CmdBuffer->End();
-		GCmdBufferMgr.Submit(CmdBuffer, GDevice.PresentQueue, nullptr, nullptr);
+		GCmdBufferMgr.Submit(GDevice, CmdBuffer);//, GDevice.PresentQueue, nullptr, nullptr);
 		CmdBuffer->WaitForFence();
 	}
+#endif
 
 #if TRY_MULTITHREADED
 	GThread.Create();
-#endif
 #endif
 	return true;
 }
@@ -1075,6 +1074,7 @@ void DoRender()
 		RenderPost(GDevice.Device, CmdBuffer, PrePost, SceneColor);
 #endif
 	}
+
 	// Blit post into scene color
 	ImageBarrier(CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, GSwapchain.Images[GSwapchain.AcquiredImageIndex], VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 0, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
 
@@ -1086,8 +1086,8 @@ void DoRender()
 		GRenderTargetPool.Release(SceneColor);
 	}
 	ImageBarrier(CmdBuffer, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, GSwapchain.GetAcquiredImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_MEMORY_READ_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
-
 #endif
+	ResourceBarrier(CmdBuffer, GSwapchain.GetAcquiredImage(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
 	CmdBuffer->End();
 
 	// First submit needs to wait for present semaphore

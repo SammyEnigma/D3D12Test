@@ -1050,26 +1050,22 @@ protected:
 	std::vector<VkDescriptorBufferInfo*> BufferInfos;
 	std::vector<VkDescriptorImageInfo*> ImageInfos;
 };
+#endif
 
-
-inline void ImageBarrier(FCmdBuffer* CmdBuffer, VkPipelineStageFlags SrcStage, VkPipelineStageFlags DestStage, VkImage Image, VkImageLayout SrcLayout, VkAccessFlags SrcMask, VkImageLayout DestLayout, VkAccessFlags DstMask, VkImageAspectFlags AspectMask)
+inline void ResourceBarrier(FCmdBuffer* CmdBuffer, ID3D12Resource* Resource, D3D12_RESOURCE_STATES Src, D3D12_RESOURCE_STATES Dest)
 {
-	VkImageMemoryBarrier Barrier;
+	D3D12_RESOURCE_BARRIER Barrier;
 	MemZero(Barrier);
-	Barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-	Barrier.srcAccessMask = SrcMask;
-	Barrier.dstAccessMask = DstMask;
-	Barrier.oldLayout = SrcLayout;
-	Barrier.newLayout = DestLayout;
-	Barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	Barrier.image = Image;
-	Barrier.subresourceRange.aspectMask = AspectMask;;
-	Barrier.subresourceRange.layerCount = 1;
-	Barrier.subresourceRange.levelCount = 1;
-	vkCmdPipelineBarrier(CmdBuffer->CmdBuffer, SrcStage, DestStage, 0, 0, nullptr, 0, nullptr, 1, &Barrier);
+	Barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+	Barrier.Transition.pResource = Resource;
+	Barrier.Transition.StateBefore = Src;
+	Barrier.Transition.StateAfter = Dest;
+	Barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+	Barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+	CmdBuffer->CommandList->ResourceBarrier(1, &Barrier);
 }
 
+#if ENABLE_VULKAN
 inline void BufferBarrier(FCmdBuffer* CmdBuffer, VkPipelineStageFlags SrcStage, VkPipelineStageFlags DestStage, VkBuffer Buffer, VkDeviceSize Offset, VkDeviceSize Size, VkAccessFlags SrcMask, VkAccessFlags DstMask)
 {
 	VkBufferMemoryBarrier Barrier;
@@ -1106,10 +1102,9 @@ struct FSwapchain
 	uint32 Height = 0;
 	void Create(IDXGIFactory4* DXGI, HWND Hwnd, FDevice& Device, uint32& WindowWidth, uint32& WindowHeight);
 
+	std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> Images;
 #if ENABLE_VULKAN
-	std::vector<VkImage> Images;
 	std::vector<FImageView> ImageViews;
-	VkDevice Device = VK_NULL_HANDLE;
 	std::vector<FSemaphore> PresentCompleteSemaphores;
 	std::vector<FSemaphore> RenderingSemaphores;
 	uint32 PresentCompleteSemaphoreIndex = 0;
@@ -1118,12 +1113,12 @@ struct FSwapchain
 #endif
 	uint32 AcquiredImageIndex = 0;
 
-#if ENABLE_VULKAN
-	inline VkImage GetAcquiredImage()
+	inline ID3D12Resource* GetAcquiredImage()
 	{
-		return Images[AcquiredImageIndex];
+		return Images[AcquiredImageIndex].Get();
 	}
 
+#if ENABLE_VULKAN
 	inline VkImageView GetAcquiredImageView()
 	{
 		return ImageViews[AcquiredImageIndex].ImageView;
@@ -1201,7 +1196,7 @@ struct FSwapchain
 		Info.pImageIndices = &AcquiredImageIndex;
 		checkVk(vkQueuePresentKHR(PresentQueue, &Info));
 #endif
-		++AcquiredImageIndex;
+		AcquiredImageIndex = (AcquiredImageIndex + 1) % BufferCount;
 	}
 };
 

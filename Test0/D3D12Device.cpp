@@ -43,6 +43,7 @@ void FSwapchain::Create(IDXGIFactory4* DXGI, HWND Hwnd, FDevice& Device, uint32&
 	{
 		ID3D12Resource* Resource;
 		checkD3D12(Swapchain->GetBuffer(Index, IID_PPV_ARGS(&Resource)));
+		Images.push_back(Resource);
 #if ENABLE_VULKAN
 		ImageViews[Index].Create(Device, Images[Index], VK_IMAGE_VIEW_TYPE_2D, (VkFormat)BACKBUFFER_VIEW_FORMAT, VK_IMAGE_ASPECT_COLOR_BIT);
 		PresentCompleteSemaphores[Index].Create(Device);

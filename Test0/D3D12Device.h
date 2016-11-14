@@ -100,12 +100,14 @@ struct FFence
 
 	void Wait(uint64 TimeInNanoseconds = 0xffffffff)
 	{
-		check(State == EState::NotSignaled);
-		check(0);
+		while (State == EState::NotSignaled)
+		{
+			::Sleep((TimeInNanoseconds + 1000) / 1000);
+			RefreshState();
+		}
 #if ENABLE_VULKAN
 		checkVk(vkWaitForFences(Device, 1, &Fence, true, TimeInNanoseconds));
 #endif
-		RefreshState();
 	}
 
 	bool IsNotSignaled() const
