@@ -105,9 +105,12 @@ inline void CmdBind(FCmdBuffer* CmdBuffer, FIndexBuffer* IB)
 #endif
 struct FVertexBuffer
 {
-	void Create(FDevice& InDevice, uint64 Size, FMemManager& MemMgr)
+	void Create(FDevice& InDevice, uint32 Stride, uint32 Size, FMemManager& MemMgr)
 	{
 		Buffer.Create(InDevice, Size);
+		View.BufferLocation = Buffer.Buffer->GetGPUVirtualAddress();
+		View.StrideInBytes = Stride;
+		View.SizeInBytes = Size;
 	}
 
 	void Destroy()
@@ -116,6 +119,8 @@ struct FVertexBuffer
 	}
 
 	FBuffer Buffer;
+
+	D3D12_VERTEX_BUFFER_VIEW View;
 };
 
 #if ENABLE_VULKAN

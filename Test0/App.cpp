@@ -607,7 +607,7 @@ static bool LoadShadersAndGeometry()
 		return false;
 	}
 
-	GObjVB.Create(GDevice, sizeof(FPosColorUVVertex) * GObj.Faces.size() * 3, GMemMgr);
+	GObjVB.Create(GDevice, sizeof(FPosColorUVVertex), sizeof(FPosColorUVVertex) * (uint32)GObj.Faces.size() * 3, GMemMgr);
 	//GObj.Faces.resize(1);
 
 	auto FillObj = [](void* Data)
@@ -828,9 +828,13 @@ bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 	return true;
 }
 
-#if ENABLE_VULKAN
-static void DrawCube(FGfxPipeline* GfxPipeline, VkDevice Device, FCmdBuffer* CmdBuffer)
+static void DrawCube(/*FGfxPipeline* GfxPipeline, */FDevice* Device, FCmdBuffer* CmdBuffer)
 {
+	CmdBuffer->CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	CmdBuffer->CommandList->IASetVertexBuffers(0, 1, &GObjVB.View);
+	CmdBuffer->CommandList->DrawInstanced(3, 1, 0, 0);
+
+#if ENABLE_VULKAN
 	FObjUB& ObjUB = *GObjUB.GetMappedData();
 	static float AngleDegrees = 0;
 	{
@@ -851,8 +855,10 @@ static void DrawCube(FGfxPipeline* GfxPipeline, VkDevice Device, FCmdBuffer* Cmd
 
 	CmdBind(CmdBuffer, &GObjVB);
 	vkCmdDraw(CmdBuffer->CmdBuffer, (uint32)GObj.Faces.size() * 3, 1, 0, 0);
+#endif
 }
 
+#if ENABLE_VULKAN
 static void DrawFloor(FGfxPipeline* GfxPipeline, VkDevice Device, FCmdBuffer* CmdBuffer)
 {
 	auto DescriptorSet = GDescriptorPool.AllocateDescriptorSet(GTestPSO.DSLayout);
@@ -885,34 +891,41 @@ static void SetDynamicStates(VkCommandBuffer CmdBuffer, uint32 Width, uint32 Hei
 	Scissor.extent.height = Height;
 	vkCmdSetScissor(CmdBuffer, 0, 1, &Scissor);
 }
+#endif
 
 static void UpdateCamera()
 {
+#if ENABLE_VULKAN
 	FViewUB& ViewUB = *GViewUB.GetMappedData();
 	ViewUB.View = FMatrix4x4::GetIdentity();
 	//ViewUB.View.Values[3 * 4 + 2] = -10;
+#endif
 	GCameraPos = GCameraPos.Add(GControl.StepDirection.Mul(0.01f));
 	GRequestControl.StepDirection = {0, 0, 0};
 	GControl.StepDirection ={0, 0, 0};
+#if ENABLE_VULKAN
 	ViewUB.View.Rows[3] = GCameraPos;
 	ViewUB.Proj = CalculateProjectionMatrix(ToRadians(60), (float)GSwapchain.GetWidth() / (float)GSwapchain.GetHeight(), 0.1f, 1000.0f);
+#endif
 }
 
-
-static void InternalRenderFrame(VkDevice Device, FRenderPass* RenderPass, FCmdBuffer* CmdBuffer, uint32 Width, uint32 Height)
+static void InternalRenderFrame(FDevice* Device, /*FRenderPass* RenderPass, */FCmdBuffer* CmdBuffer/*, uint32 Width, uint32 Height* /*/)
 {
+#if ENABLE_VULKAN
 	auto* GfxPipeline = GObjectCache.GetOrCreateGfxPipeline(&GTestPSO, &GPosColorUVFormat, Width, Height, RenderPass, GControl.ViewMode == EViewMode::Wireframe);
 	vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, GfxPipeline->Pipeline);
 
 	SetDynamicStates(CmdBuffer->CmdBuffer, Width, Height);
 
 	DrawFloor(GfxPipeline, Device, CmdBuffer);
-	DrawCube(GfxPipeline, Device, CmdBuffer);
+#endif
+	DrawCube(/*GfxPipeline, */Device, CmdBuffer);
 }
 
-static void RenderFrame(VkDevice Device, FCmdBuffer* CmdBuffer, FImage2DWithView* ColorBuffer, FImage2DWithView* DepthBuffer, FImage2DWithView* ResolveColorBuffer)
+static void RenderFrame(FDevice* Device, FCmdBuffer* CmdBuffer/*, FImage2DWithView* ColorBuffer, FImage2DWithView* DepthBuffer, FImage2DWithView* ResolveColorBuffer*/)
 {
 	UpdateCamera();
+#if ENABLE_VULKAN
 
 	FillFloor(CmdBuffer);
 
@@ -921,6 +934,7 @@ static void RenderFrame(VkDevice Device, FCmdBuffer* CmdBuffer, FImage2DWithView
 	auto* Framebuffer = GObjectCache.GetOrCreateFramebuffer(RenderPass->RenderPass, ColorBuffer->GetImageView(), DepthBuffer->GetImageView(), ColorBuffer->GetWidth(), ColorBuffer->GetHeight(), ResolveColorBuffer ? ResolveColorBuffer->GetImageView() : VK_NULL_HANDLE);
 
 	CmdBuffer->BeginRenderPass(RenderPass->RenderPass, *Framebuffer, TRY_MULTITHREADED == 1);
+#endif
 #if TRY_MULTITHREADED == 1
 	{
 		GThread.ParentCmdBuffer = CmdBuffer;
@@ -934,12 +948,15 @@ static void RenderFrame(VkDevice Device, FCmdBuffer* CmdBuffer, FImage2DWithView
 		CmdBuffer->ExecuteSecondary();
 	}
 #else
-	InternalRenderFrame(Device, RenderPass, CmdBuffer, ColorBuffer->GetWidth(), ColorBuffer->GetHeight());
+	InternalRenderFrame(Device, /*RenderPass, */CmdBuffer/*, ColorBuffer->GetWidth(), ColorBuffer->GetHeight()*/);
 #endif
 
+#if ENABLE_VULKAN
 	CmdBuffer->EndRenderPass();
+#endif
 }
 
+#if ENABLE_VULKAN
 void RenderPost(VkDevice Device, FCmdBuffer* CmdBuffer, FRenderTargetPool::FEntry* SceneColorEntry, FRenderTargetPool::FEntry* SceneColorAfterPostEntry)
 {
 	SceneColorEntry->DoTransition(CmdBuffer, VK_IMAGE_LAYOUT_GENERAL);
@@ -1064,9 +1081,12 @@ void DoRender()
 		SceneColor = ResolvedSceneColor;
 	}
 	else
+#endif
 	{
-		RenderFrame(GDevice.Device, CmdBuffer, &SceneColor->Texture, &DepthBuffer->Texture, nullptr);
+		RenderFrame(&GDevice, CmdBuffer/*, &SceneColor->Texture, &DepthBuffer->Texture, nullptr*/);
 	}
+
+#if ENABLE_VULKAN
 	GRenderTargetPool.Release(DepthBuffer);
 
 	if (GControl.DoPost)
