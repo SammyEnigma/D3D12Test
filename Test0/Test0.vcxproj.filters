@@ -39,6 +39,9 @@
     <ClInclude Include="D3D12Device.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="ObjLoader.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="stdafx.cpp">
@@ -51,6 +54,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="D3D12Device.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ObjLoader.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

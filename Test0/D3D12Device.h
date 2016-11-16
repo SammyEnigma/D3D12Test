@@ -75,7 +75,7 @@ struct FDevice
 struct FFence
 {
 	Microsoft::WRL::ComPtr<ID3D12Fence> Fence;
-	HANDLE Event = nullptr;
+	//HANDLE Event = nullptr;
 	uint64 FenceSignaledCounter = 0;
 
 	enum EState
@@ -88,8 +88,8 @@ struct FFence
 	void Create(FDevice& InDevice)
 	{
 		checkD3D12(InDevice.Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), &Fence));
-		Event = CreateEvent(nullptr, false, false, nullptr);
-		check(Event != nullptr);
+		//Event = CreateEvent(nullptr, false, false, nullptr);
+		//check(Event != nullptr);
 		FenceSignaledCounter = 1;
 	}
 
@@ -273,7 +273,10 @@ struct FCmdBufferMgr
 	{
 		for (auto* CB : CmdBuffers)
 		{
-			CB->RefreshState();
+			if (CB->State == FCmdBuffer::EState::Submitted)
+			{
+				CB->WaitForFence();
+			}
 			CB->Destroy();
 			delete CB;
 		}

@@ -5,8 +5,9 @@
 #include "D3D12Mem.h"
 #include "D3D12Device.h"
 #include "D3D12Resources.h"
+#include "ObjLoader.h"
+
 #if ENABLE_VULKAN
-#include "../Meshes/ObjLoader.h"
 
 // 0 no multithreading
 // 1 inside a render pass
@@ -36,10 +37,11 @@ static FMemManager GMemMgr;
 static FDescriptorPool GDescriptorPool;
 #if ENABLE_VULKAN
 static FStagingManager GStagingManager;
-
+#endif
 
 static FVertexBuffer GObjVB;
 static Obj::FObj GObj;
+#if ENABLE_VULKAN
 static FVertexBuffer GFloorVB;
 static FIndexBuffer GFloorIB;
 struct FCreateFloorUB
@@ -252,6 +254,7 @@ struct FThread
 FThread GThread;
 
 #endif
+#endif
 
 
 
@@ -262,7 +265,7 @@ struct FPosColorUVVertex
 	float u, v;
 };
 FVertexFormat GPosColorUVFormat;
-#endif
+
 bool GQuitting = false;
 
 #if ENABLE_VULKAN
@@ -492,23 +495,36 @@ struct FObjectCache
 	}
 };
 FObjectCache GObjectCache;
+#endif
 
 
 template <typename TFillLambda>
-void MapAndFillBufferSyncOneShotCmdBuffer(FBuffer* DestBuffer, TFillLambda Fill, uint32 Size)
+void MapAndFillBufferSyncOneShotCmdBuffer(FDevice& Device, FBuffer* DestBuffer, TFillLambda Fill, uint32 Size)
 {
-	auto* CmdBuffer = GCmdBufferMgr.AllocateCmdBuffer();
+	// HACK!
+	D3D12_RANGE ReadRange;
+	MemZero(ReadRange);
+	void* Data;
+	checkD3D12(DestBuffer->Buffer->Map(0, &ReadRange, &Data));
+#if ENABLE_VULKAN
+	auto* CmdBuffer = GCmdBufferMgr.AllocateCmdBuffer(Device);
 	CmdBuffer->Begin();
 	FStagingBuffer* StagingBuffer = GStagingManager.RequestUploadBuffer(Size);
+#endif
+	Fill(Data);
+#if ENABLE_VULKAN
 	MapAndFillBufferSync(StagingBuffer, CmdBuffer, DestBuffer, Fill, Size);
 	FlushMappedBuffer(GDevice.Device, StagingBuffer);
 	CmdBuffer->End();
 	GCmdBufferMgr.Submit(CmdBuffer, GDevice.PresentQueue, nullptr, nullptr);
 	CmdBuffer->WaitForFence();
+#endif
+	DestBuffer->Buffer->Unmap(0, nullptr);
 }
 
 static bool LoadShadersAndGeometry()
 {
+#if ENABLE_VULKAN
 	static bool bDoCompile = false;
 	if (bDoCompile)
 	{
@@ -577,20 +593,22 @@ static bool LoadShadersAndGeometry()
 		check(GFillTexturePSO.Create(GDevice.Device, "../Shaders/FillTexture.comp.spv"));
 		check(GSetupFloorPSO.Create(GDevice.Device, "../Shaders/CreateFloor.comp.spv"));
 	}
+#endif
 
 	// Setup Vertex Format
-	GPosColorUVFormat.AddVertexBuffer(0, sizeof(FPosColorUVVertex), VK_VERTEX_INPUT_RATE_VERTEX);
-	GPosColorUVFormat.AddVertexAttribute(0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(FPosColorUVVertex, x));
-	GPosColorUVFormat.AddVertexAttribute(0, 1, VK_FORMAT_R8G8B8A8_UNORM, offsetof(FPosColorUVVertex, Color));
-	GPosColorUVFormat.AddVertexAttribute(0, 2, VK_FORMAT_R32G32_SFLOAT, offsetof(FPosColorUVVertex, u));
+	GPosColorUVFormat.AddVertexBuffer(0, sizeof(FPosColorUVVertex), D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA);
+	GPosColorUVFormat.AddVertexAttribute(0, 0, DXGI_FORMAT_R32G32B32_FLOAT, offsetof(FPosColorUVVertex, x));
+	GPosColorUVFormat.AddVertexAttribute(0, 1, DXGI_FORMAT_R8G8B8A8_UNORM, offsetof(FPosColorUVVertex, Color));
+	GPosColorUVFormat.AddVertexAttribute(0, 2, DXGI_FORMAT_R32G32_FLOAT, offsetof(FPosColorUVVertex, u));
 
 	// Load and fill geometry
 	if (!Obj::Load("../Meshes/Cube/cube.obj", GObj))
 	{
 		return false;
 	}
+
+	GObjVB.Create(GDevice, sizeof(FPosColorUVVertex) * GObj.Faces.size() * 3, GMemMgr);
 	//GObj.Faces.resize(1);
-	GObjVB.Create(GDevice.Device, sizeof(FPosColorUVVertex) * GObj.Faces.size() * 3, &GMemMgr);
 
 	auto FillObj = [](void* Data)
 	{
@@ -611,12 +629,11 @@ static bool LoadShadersAndGeometry()
 			}
 		}
 	};
-
-	MapAndFillBufferSyncOneShotCmdBuffer(&GObjVB.Buffer, FillObj, sizeof(FPosColorUVVertex) * (uint32)GObj.Faces.size() * 3);
-
+	MapAndFillBufferSyncOneShotCmdBuffer(GDevice, &GObjVB.Buffer, FillObj, sizeof(FPosColorUVVertex) * (uint32)GObj.Faces.size() * 3);
 	return true;
 }
 
+#if ENABLE_VULKAN
 void CreateAndFillTexture()
 {
 	srand(0);
@@ -777,12 +794,12 @@ bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 	GStagingManager.Create(GDevice.Device, &GMemMgr);
 
 	GObjectCache.Create(&GDevice);
-
+#endif
 	if (!LoadShadersAndGeometry())
 	{
 		return false;
 	}
-
+#if ENABLE_VULKAN
 	GViewUB.Create(GDevice.Device, &GMemMgr);
 	GObjUB.Create(GDevice.Device, &GMemMgr);
 	GIdentityUB.Create(GDevice.Device, &GMemMgr);
@@ -987,13 +1004,14 @@ DWORD __stdcall FThread::ThreadFunction(void* Param)
 
 void DoRender()
 {
-#if ENABLE_VULKAN
-	GRenderTargetPool.EmptyPool();
-#endif
 	if (GQuitting)
 	{
 		return;
 	}
+
+#if ENABLE_VULKAN
+	GRenderTargetPool.EmptyPool();
+#endif
 
 	GControl = GRequestControl;
 
@@ -1008,7 +1026,6 @@ void DoRender()
 	}
 
 #if ENABLE_VULKAN
-
 	auto* SceneColor = GRenderTargetPool.Acquire(GControl.DoMSAA ? "SceneColorMSAA" : "SceneColor", GSwapchain.GetWidth(), GSwapchain.GetHeight(), VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 1, GControl.DoMSAA ? VK_SAMPLE_COUNT_4_BIT : VK_SAMPLE_COUNT_1_BIT);
 
 	SceneColor->DoTransition(CmdBuffer, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
@@ -1110,6 +1127,7 @@ void DoResize(uint32 Width, uint32 Height)
 
 void DoDeinit()
 {
+	GCmdBufferMgr.Destroy();
 #if ENABLE_VULKAN
 	checkVk(vkDeviceWaitIdle(GDevice.Device));
 	GRenderTargetPool.EmptyPool();
@@ -1126,7 +1144,9 @@ void DoDeinit()
 	GViewUB.Destroy();
 	GCreateFloorUB.Destroy();
 	GObjUB.Destroy();
+#endif
 	GObjVB.Destroy();
+#if ENABLE_VULKAN
 	GIdentityUB.Destroy();
 
 	GSampler.Destroy();
@@ -1148,7 +1168,6 @@ void DoDeinit()
 	GObjectCache.Destroy();
 #endif
 	GMemMgr.Destroy();
-	GCmdBufferMgr.Destroy();
 	GSwapchain.Destroy();
 	GDevice.Destroy();
 	GInstance.Destroy();

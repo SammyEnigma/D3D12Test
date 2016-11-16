@@ -1,43 +1,55 @@
 
 #pragma once
 
-#if ENABLE_VULKAN
-
-#include "VkDevice.h"
-#include "VkMem.h"
-#include <d3dx12.h>
+#include "D3D12Device.h"
+#include "D3D12Mem.h"
 
 struct FBuffer
 {
-	void Create(VkDevice InDevice, uint64 InSize, VkBufferUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropertyFlags, FMemManager* MemMgr)
+	void Create(FDevice& InDevice, uint64 InSize)//, VkBufferUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropertyFlags, FMemManager* MemMgr)
 	{
-		Device = InDevice;
 		Size = InSize;
 
-		VkBufferCreateInfo BufferInfo;
-		MemZero(BufferInfo);
-		BufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		BufferInfo.size = Size;
-		BufferInfo.usage = UsageFlags;
-		//BufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		checkVk(vkCreateBuffer(Device, &BufferInfo, nullptr, &Buffer));
+		D3D12_RESOURCE_DESC Desc;
+		MemZero(Desc);
+		Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+		Desc.Width = InSize;
+		Desc.Height = 1;
+		Desc.DepthOrArraySize = 1;
+		Desc.MipLevels = 1;
+		Desc.Format = DXGI_FORMAT_UNKNOWN;
+		Desc.SampleDesc.Count = 1;
+		Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 
-		vkGetBufferMemoryRequirements(Device, Buffer, &Reqs);
+		D3D12_HEAP_PROPERTIES Heap;
+		MemZero(Heap);
+		Heap.Type = D3D12_HEAP_TYPE_UPLOAD;
+		Heap.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+		Heap.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+		Heap.CreationNodeMask = 1;
+		Heap.VisibleNodeMask = 1;
 
+		checkD3D12(InDevice.Device->CreateCommittedResource(
+			&Heap,
+			D3D12_HEAP_FLAG_NONE,
+			&Desc,
+			D3D12_RESOURCE_STATE_GENERIC_READ,
+			nullptr,
+			IID_PPV_ARGS(&Buffer)));
+#if ENABLE_VULKAN
 		SubAlloc = MemMgr->Alloc(Reqs, MemPropertyFlags, false);
-
 		vkBindBufferMemory(Device, Buffer, SubAlloc->GetHandle(), SubAlloc->GetBindOffset());
+#endif
 	}
 
 	void Destroy()
 	{
-		vkDestroyBuffer(Device, Buffer, nullptr);
-		Buffer = VK_NULL_HANDLE;
-		Device = VK_NULL_HANDLE;
-
+#if ENABLE_VULKAN
 		SubAlloc->Release();
+#endif
 	}
 
+#if ENABLE_VULKAN
 	void* GetMappedData()
 	{
 		return SubAlloc->GetMappedData();
@@ -53,14 +65,15 @@ struct FBuffer
 		return Size;
 	}
 
-	VkDevice Device;
-	VkBuffer Buffer = VK_NULL_HANDLE;
+#endif
+	Microsoft::WRL::ComPtr<ID3D12Resource> Buffer;
 	uint64 Size = 0;
-	VkMemoryRequirements Reqs;
+#if ENABLE_VULKAN
 	FMemSubAlloc* SubAlloc = nullptr;
+#endif
 };
 
-
+#if ENABLE_VULKAN
 struct FIndexBuffer
 {
 	void Create(VkDevice InDevice, uint32 InNumIndices, VkIndexType InIndexType, FMemManager* MemMgr,
@@ -89,15 +102,12 @@ inline void CmdBind(FCmdBuffer* CmdBuffer, FIndexBuffer* IB)
 {
 	vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, IB->Buffer.Buffer, IB->Buffer.GetBindOffset(), IB->IndexType);
 }
-
+#endif
 struct FVertexBuffer
 {
-	void Create(VkDevice InDevice, uint64 Size, FMemManager* MemMgr,
-		VkBufferUsageFlags InUsageFlags = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-		VkMemoryPropertyFlags MemPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+	void Create(FDevice& InDevice, uint64 Size, FMemManager& MemMgr)
 	{
-		VkBufferUsageFlags UsageFlags = InUsageFlags | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-		Buffer.Create(InDevice, Size, UsageFlags, MemPropertyFlags, MemMgr);
+		Buffer.Create(InDevice, Size);
 	}
 
 	void Destroy()
@@ -108,6 +118,7 @@ struct FVertexBuffer
 	FBuffer Buffer;
 };
 
+#if ENABLE_VULKAN
 inline void CmdBind(FCmdBuffer* CmdBuffer, FVertexBuffer* VB)
 {
 	VkDeviceSize Offset = 0;
@@ -571,34 +582,33 @@ struct FGfxPSO : public FPSO
 		}
 	}
 };
+#endif
 
 struct FVertexFormat
 {
-	std::vector<VkVertexInputBindingDescription> VertexBuffers;
-	std::vector<VkVertexInputAttributeDescription> VertexAttributes;
+	std::vector<D3D12_INPUT_CLASSIFICATION> InputRates;
+	std::vector<uint32> Strides;
+	std::vector<D3D12_INPUT_ELEMENT_DESC> VertexAttributes;
 
-	void AddVertexBuffer(uint32 Binding, uint32 Stride, VkVertexInputRate InputRate)
+	void AddVertexBuffer(uint32 Binding, uint32 Stride, D3D12_INPUT_CLASSIFICATION InputRate)
 	{
-		VkVertexInputBindingDescription VBDesc;
-		MemZero(VBDesc);
-		VBDesc.binding = Binding;
-		VBDesc.stride = Stride;
-		VBDesc.inputRate = InputRate;
-
-		VertexBuffers.push_back(VBDesc);
+		check(InputRates.size() == Binding);
+		InputRates.push_back(InputRate);
+		Strides.push_back(Stride);
 	}
 
-	void AddVertexAttribute(uint32 Binding, uint32 Location, VkFormat Format, uint32 Offset)
+	void AddVertexAttribute(uint32 Binding, uint32 Location, DXGI_FORMAT Format, uint32 Offset)
 	{
-		VkVertexInputAttributeDescription VIADesc;
+		D3D12_INPUT_ELEMENT_DESC VIADesc;
 		MemZero(VIADesc);
-		VIADesc.binding = Binding;
-		VIADesc.location = Location;
-		VIADesc.format = Format;
-		VIADesc.offset = Offset;
+		VIADesc.Format = Format;
+		VIADesc.InputSlot = Binding;
+		VIADesc.InputSlotClass = InputRates[Binding];
+		VIADesc.AlignedByteOffset = Offset;
 		VertexAttributes.push_back(VIADesc);
 	}
 
+#if ENABLE_VULKAN
 	VkPipelineVertexInputStateCreateInfo GetCreateInfo()
 	{
 		VkPipelineVertexInputStateCreateInfo VIInfo;
@@ -611,8 +621,10 @@ struct FVertexFormat
 
 		return VIInfo;
 	}
+#endif
 };
 
+#if ENABLE_VULKAN
 class FGfxPSOLayout
 {
 public:

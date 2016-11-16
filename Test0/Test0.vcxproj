@@ -154,6 +154,7 @@
     <ClInclude Include="D3D12Device.h" />
     <ClInclude Include="D3D12Mem.h" />
     <ClInclude Include="D3D12Resources.h" />
+    <ClInclude Include="ObjLoader.h" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="targetver.h" />
@@ -163,6 +164,7 @@
   <ItemGroup>
     <ClCompile Include="App.cpp" />
     <ClCompile Include="D3D12Device.cpp" />
+    <ClCompile Include="ObjLoader.cpp" />
     <ClCompile Include="stdafx.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
