@@ -18,32 +18,41 @@ void FInstance::SetupDebugLayer()
 	}
 }
 
-void FSwapchain::Create(IDXGIFactory4* DXGI, HWND Hwnd, FDevice& Device, uint32& WindowWidth, uint32& WindowHeight)
+void FSwapchain::Create(IDXGIFactory4* DXGI, HWND Hwnd, FDevice& Device, uint32& WindowWidth, uint32& WindowHeight, FDescriptorPool& Pool)
 {
 	Width = WindowWidth;
 	Height = WindowHeight;
 
-	DXGI_SWAP_CHAIN_DESC Desc;
+	DXGI_SWAP_CHAIN_DESC1 Desc;
 	MemZero(Desc);
-	Desc.BufferDesc.Width = WindowWidth;
-	Desc.BufferDesc.Height = WindowHeight;
+	Desc.BufferCount = BufferCount;
+	Desc.Width = WindowWidth;
+	Desc.Height = WindowHeight;
+	Desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	Desc.BufferUsage = /*DXGI_USAGE_BACK_BUFFER | DXGI_USAGE_SHADER_INPUT | */DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	Desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+	Desc.SampleDesc.Count = 1;
 	//Desc.BufferDesc.RefreshRate.Numerator = 60;
 	//Desc.BufferDesc.RefreshRate.Denominator = 1;
-	Desc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 	//Desc.BufferDesc.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_PROGRESSIVE;
-	Desc.BufferUsage = DXGI_USAGE_BACK_BUFFER | DXGI_USAGE_SHADER_INPUT | DXGI_USAGE_RENDER_TARGET_OUTPUT;
-	Desc.BufferCount = BufferCount;
-	Desc.SampleDesc.Count = 1;
-	Desc.OutputWindow = Hwnd;
-	Desc.Windowed = true;
-	Desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-	checkD3D12(DXGI->CreateSwapChain(Device.Queue.Get(), &Desc, &Swapchain));
+	//Desc.OutputWindow = Hwnd;
+	//Desc.Windowed = true;
+	Microsoft::WRL::ComPtr<IDXGISwapChain1> Swapchain1;
+	checkD3D12(DXGI->CreateSwapChainForHwnd(Device.Queue.Get(), Hwnd, &Desc, nullptr, nullptr, &Swapchain1));
+
+	checkD3D12(DXGI->MakeWindowAssociation(Hwnd, DXGI_MWA_NO_ALT_ENTER));
+
+	Swapchain1.As(&Swapchain);
 
 	for (uint32 Index = 0; Index < BufferCount; ++Index)
 	{
 		ID3D12Resource* Resource;
 		checkD3D12(Swapchain->GetBuffer(Index, IID_PPV_ARGS(&Resource)));
 		Images.push_back(Resource);
+		D3D12_CPU_DESCRIPTOR_HANDLE RTVHandle = Pool.AllocateCPURTV();
+		Device.Device->CreateRenderTargetView(Images[Index].Get(), nullptr, RTVHandle);
+		ImageViews.push_back(RTVHandle);
+
 #if ENABLE_VULKAN
 		ImageViews[Index].Create(Device, Images[Index], VK_IMAGE_VIEW_TYPE_2D, (VkFormat)BACKBUFFER_VIEW_FORMAT, VK_IMAGE_ASPECT_COLOR_BIT);
 		PresentCompleteSemaphores[Index].Create(Device);
@@ -441,32 +450,24 @@ void FCmdBuffer::BeginRenderPass(VkRenderPass RenderPass, const FFramebuffer& Fr
 }
 #endif
 
+/*
 void FSwapchain::ClearAndTransitionToPresent(FDevice& Device, FCmdBuffer* CmdBuffer, FDescriptorPool* DescriptorPool)
 {
-#if ENABLE_VULKAN
-	VkClearColorValue Color;
-	MemZero(Color);
-	VkImageSubresourceRange Range;
-	MemZero(Range);
-	Range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-	Range.levelCount = 1;
-	Range.layerCount = 1;
-#endif
 	for (uint32 Index = 0; Index < (uint32)Images.size(); ++Index)
 	{
-		ResourceBarrier(CmdBuffer, Images[Index].Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_RENDER_TARGET);
+		ResourceBarrier(CmdBuffer, Images[Index].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
 #if ENABLE_VULKAN
 		ImageBarrier(CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, Images[Index], VK_IMAGE_LAYOUT_UNDEFINED, 0, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
-		vkCmdClearColorImage(CmdBuffer->CmdBuffer, Images[Index], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &Color, 1, &Range);
+#endif
+		//D3D12_CPU_DESCRIPTOR_HANDLE RTView = DescriptorPool->AllocateCPURTV();
+		//Device.Device->CreateRenderTargetView(Images[Index].Get(), nullptr, RTView);
+
+		//CmdBuffer->CommandList->OMSetRenderTargets(1, &RTView, false, nullptr);
+		float Color[4] = {1, 0, 0, 1};
+		//CmdBuffer->CommandList->ClearRenderTargetView(RTView, Color, 0, nullptr);
+#if ENABLE_VULKAN
 		ImageBarrier(CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, Images[Index], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_MEMORY_READ_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
 #endif
-		D3D12_CPU_DESCRIPTOR_HANDLE RTView = DescriptorPool->RTVHeap->GetCPUDescriptorHandleForHeapStart();
-		uint32 DescSize = Device.Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-
-		Device.Device->CreateRenderTargetView(Images[Index].Get(), nullptr, RTView);
-
-		CmdBuffer->CommandList->OMSetRenderTargets(1, &RTView, false, nullptr);
-		float Color[4] = {1, 0, 0, 1};
-		CmdBuffer->CommandList->ClearRenderTargetView(RTView, Color, 0, nullptr);
 	}
 }
+*/

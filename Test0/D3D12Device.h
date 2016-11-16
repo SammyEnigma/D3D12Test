@@ -14,7 +14,7 @@ struct FInstance
 	{
 		SetupDebugLayer();
 		//DXGI_CREATE_FACTORY_DEBUG
-		checkD3D12(CreateDXGIFactory2(DXGI_CREATE_FACTORY_DEBUG, IID_PPV_ARGS(&DXGIFactory)));
+		checkD3D12(CreateDXGIFactory1(IID_PPV_ARGS(&DXGIFactory)));
 	}
 
 	void SetupDebugLayer();
@@ -49,7 +49,7 @@ struct FDevice
 
 	void Create()
 	{
-		checkD3D12(D3D12CreateDevice(Adapter.Get(), D3D_FEATURE_LEVEL_12_0, _uuidof(ID3D12Device), &Device));
+		checkD3D12(D3D12CreateDevice(Adapter.Get(), D3D_FEATURE_LEVEL_11_0, _uuidof(ID3D12Device), &Device));
 
 		D3D12_COMMAND_QUEUE_DESC QueueDesc;
 		MemZero(QueueDesc);
@@ -88,7 +88,7 @@ struct FFence
 	void Create(FDevice& InDevice)
 	{
 		checkD3D12(InDevice.Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), &Fence));
-		Event = CreateEventEx(nullptr, false, false, EVENT_ALL_ACCESS);
+		Event = CreateEvent(nullptr, false, false, nullptr);
 		check(Event != nullptr);
 		FenceSignaledCounter = 1;
 	}
@@ -191,7 +191,6 @@ struct FCmdBuffer
 			Fence.RefreshState();
 			if (PrevCounter != Fence.FenceSignaledCounter)
 			{
-				checkD3D12(CommandList->Reset(Allocator.Get(), nullptr));
 				State = EState::ReadyForBegin;
 			}
 		}
@@ -209,13 +208,16 @@ struct FCmdBuffer
 	void Create(FDevice& InDevice)
 	{
 		checkD3D12(InDevice.Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, __uuidof(ID3D12CommandAllocator), &Allocator));
-		checkD3D12(InDevice.Device->CreateCommandList(1, D3D12_COMMAND_LIST_TYPE_DIRECT, Allocator.Get(), nullptr, _uuidof(ID3D12GraphicsCommandList), &CommandList));
+		checkD3D12(InDevice.Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, Allocator.Get(), nullptr, _uuidof(ID3D12GraphicsCommandList), &CommandList));
 		Fence.Create(InDevice);
+		checkD3D12(CommandList->Close());
 	}
 
 	void Begin()
 	{
 		check(State == EState::ReadyForBegin);
+		Allocator->Reset();
+		CommandList->Reset(Allocator.Get(), nullptr);
 		State = EState::Begun;
 	}
 };

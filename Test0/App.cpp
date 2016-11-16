@@ -770,9 +770,9 @@ bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 	GInstance.Create(hInstance, hWnd);
 	GInstance.CreateDevice(GDevice);
 	GCmdBufferMgr.Create(GDevice/*.Device, GDevice.PresentQueueFamilyIndex*/);
-	GSwapchain.Create(GInstance.DXGIFactory.Get(), hWnd, GDevice, Width, Height);
 	GMemMgr.Create(GDevice);
 	GDescriptorPool.Create(GDevice);
+	GSwapchain.Create(GInstance.DXGIFactory.Get(), hWnd, GDevice, Width, Height, GDescriptorPool);
 #if ENABLE_VULKAN
 	GStagingManager.Create(GDevice.Device, &GMemMgr);
 
@@ -804,15 +804,6 @@ bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 	GSampler.Create(GDevice.Device);
 	SetupFloor();
 #endif
-	{
-		// Setup on Present layout
-		auto* CmdBuffer = GCmdBufferMgr.AllocateCmdBuffer(GDevice);
-		CmdBuffer->Begin();
-		GSwapchain.ClearAndTransitionToPresent(GDevice, CmdBuffer, &GDescriptorPool);
-		CmdBuffer->End();
-		GCmdBufferMgr.Submit(GDevice, CmdBuffer);//, GDevice.PresentQueue, nullptr, nullptr);
-		CmdBuffer->WaitForFence();
-	}
 
 #if TRY_MULTITHREADED
 	GThread.Create();
@@ -1007,8 +998,15 @@ void DoRender()
 	GControl = GRequestControl;
 
 	auto* CmdBuffer = GCmdBufferMgr.GetActiveCmdBuffer(GDevice);
-
 	CmdBuffer->Begin();
+	ResourceBarrier(CmdBuffer, GSwapchain.GetAcquiredImage(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+	{
+		static int N = 0;
+		++N;
+		const float ClearColor[] ={(float)N / 256.0f, 0.2f, 0.4f, 1.0f};
+		CmdBuffer->CommandList->ClearRenderTargetView(GSwapchain.GetAcquiredImageView(), ClearColor, 0, nullptr);
+	}
+
 #if ENABLE_VULKAN
 
 	auto* SceneColor = GRenderTargetPool.Acquire(GControl.DoMSAA ? "SceneColorMSAA" : "SceneColor", GSwapchain.GetWidth(), GSwapchain.GetHeight(), VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 1, GControl.DoMSAA ? VK_SAMPLE_COUNT_4_BIT : VK_SAMPLE_COUNT_1_BIT);

@@ -5,6 +5,7 @@
 
 #include "VkDevice.h"
 #include "VkMem.h"
+#include <d3dx12.h>
 
 struct FBuffer
 {
@@ -701,36 +702,33 @@ struct FDescriptorPool
 {
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> RTVHeap;
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> CSUHeap;
+	D3D12_CPU_DESCRIPTOR_HANDLE RTVCPUStart = {0};
+	D3D12_GPU_DESCRIPTOR_HANDLE RTVGPUStart = {0};
+	SIZE_T RTVDescriptorSize = 0;
 
 	void Create(FDevice& InDevice)
 	{
 		D3D12_DESCRIPTOR_HEAP_DESC HeapDesc;
 		MemZero(HeapDesc);
-		HeapDesc.NodeMask = 1;
-		HeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+		//HeapDesc.NodeMask = 1;
+		HeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE/*D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE*/;
 		{
-			HeapDesc.NumDescriptors = 256;
+			HeapDesc.NumDescriptors = 4096;
 			HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
 			checkD3D12(InDevice.Device->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&RTVHeap)));
 		}
 
 		{
-			HeapDesc.NumDescriptors = 2048;
+			HeapDesc.NumDescriptors = 32768;
 			HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 			checkD3D12(InDevice.Device->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&CSUHeap)));
 		}
 
-#if ENABLE_VULKAN
-		std::vector<VkDescriptorPoolSize> PoolSizes;
-		auto AddPool = [&](VkDescriptorType Type, uint32 NumDescriptors)
-		{
-			VkDescriptorPoolSize PoolSize;
-			MemZero(PoolSize);
-			PoolSize.type = Type;
-			PoolSize.descriptorCount = NumDescriptors;
-			PoolSizes.push_back(PoolSize);
-		};
+		RTVCPUStart = RTVHeap->GetCPUDescriptorHandleForHeapStart();
+		RTVGPUStart = RTVHeap->GetGPUDescriptorHandleForHeapStart();
+		RTVDescriptorSize = InDevice.Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
+#if ENABLE_VULKAN
 		AddPool(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 32768);
 		AddPool(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 16384);
 		AddPool(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 32768);
@@ -738,15 +736,6 @@ struct FDescriptorPool
 		AddPool(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 32768);
 		AddPool(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 16384);
 		AddPool(VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 16384);
-
-		VkDescriptorPoolCreateInfo Info;
-		MemZero(Info);
-		Info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-		Info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-		Info.maxSets = 32768;
-		Info.poolSizeCount = (uint32)PoolSizes.size();
-		Info.pPoolSizes = &PoolSizes[0];
-		checkVk(vkCreateDescriptorPool(InDevice, &Info, nullptr, &Pool));
 #endif
 	}
 
@@ -763,20 +752,22 @@ struct FDescriptorPool
 #if ENABLE_VULKAN
 	VkDescriptorSet AllocateDescriptorSet(VkDescriptorSetLayout DSLayout)
 	{
-		VkDescriptorSet DescriptorSet = VK_NULL_HANDLE;
-		VkDescriptorSetAllocateInfo Info;
-		MemZero(Info);
-		Info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		Info.descriptorPool = Pool;
-		Info.descriptorSetCount = 1;
-		Info.pSetLayouts = &DSLayout;
-		checkVk(vkAllocateDescriptorSets(Device, &Info, &DescriptorSet));
-		return DescriptorSet;
+	}
+#endif
+
+	D3D12_CPU_DESCRIPTOR_HANDLE AllocateCPURTV()
+	{
+		D3D12_CPU_DESCRIPTOR_HANDLE NewHandle = RTVCPUStart;
+		RTVCPUStart.ptr += RTVDescriptorSize;
+		return NewHandle;
 	}
 
-	VkDevice Device = VK_NULL_HANDLE;
-	VkDescriptorPool Pool = VK_NULL_HANDLE;
-#endif
+	D3D12_GPU_DESCRIPTOR_HANDLE AllocateGPURTV()
+	{
+		D3D12_GPU_DESCRIPTOR_HANDLE NewHandle = RTVGPUStart;
+		RTVGPUStart.ptr += RTVDescriptorSize;
+		return NewHandle;
+	}
 };
 
 #if ENABLE_VULKAN
@@ -1056,12 +1047,12 @@ inline void ResourceBarrier(FCmdBuffer* CmdBuffer, ID3D12Resource* Resource, D3D
 {
 	D3D12_RESOURCE_BARRIER Barrier;
 	MemZero(Barrier);
+	Barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 	Barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
 	Barrier.Transition.pResource = Resource;
 	Barrier.Transition.StateBefore = Src;
 	Barrier.Transition.StateAfter = Dest;
 	Barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-	Barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 	CmdBuffer->CommandList->ResourceBarrier(1, &Barrier);
 }
 
@@ -1088,8 +1079,7 @@ inline void BufferBarrier(FCmdBuffer* CmdBuffer, VkPipelineStageFlags SrcStage, 
 #endif
 struct FSwapchain
 {
-	Microsoft::WRL::ComPtr<IDXGISwapChain> Swapchain;
-	Microsoft::WRL::ComPtr<IDXGISwapChain1> Swapchain1;
+	Microsoft::WRL::ComPtr<IDXGISwapChain3> Swapchain;
 	const uint32 BufferCount = 3;
 #if ENABLE_VULKAN
 	enum
@@ -1100,11 +1090,11 @@ struct FSwapchain
 #endif
 	uint32 Width = 0;
 	uint32 Height = 0;
-	void Create(IDXGIFactory4* DXGI, HWND Hwnd, FDevice& Device, uint32& WindowWidth, uint32& WindowHeight);
+	void Create(IDXGIFactory4* DXGI, HWND Hwnd, FDevice& Device, uint32& WindowWidth, uint32& WindowHeight, FDescriptorPool& Pool);
 
 	std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> Images;
+	std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> ImageViews;
 #if ENABLE_VULKAN
-	std::vector<FImageView> ImageViews;
 	std::vector<FSemaphore> PresentCompleteSemaphores;
 	std::vector<FSemaphore> RenderingSemaphores;
 	uint32 PresentCompleteSemaphoreIndex = 0;
@@ -1118,12 +1108,10 @@ struct FSwapchain
 		return Images[AcquiredImageIndex].Get();
 	}
 
-#if ENABLE_VULKAN
-	inline VkImageView GetAcquiredImageView()
+	inline D3D12_CPU_DESCRIPTOR_HANDLE GetAcquiredImageView()
 	{
-		return ImageViews[AcquiredImageIndex].ImageView;
+		return ImageViews[AcquiredImageIndex];
 	}
-#endif
 
 	void Destroy()
 	{
@@ -1145,8 +1133,7 @@ struct FSwapchain
 
 #endif
 		//Swapchain1->Release();
-		Swapchain1 = nullptr;
-		Swapchain->SetFullscreenState(false, NULL);
+		//Swapchain->SetFullscreenState(false, NULL);
 		//Swapchain->Release();
 		Swapchain = nullptr;
 	}
@@ -1162,7 +1149,7 @@ struct FSwapchain
 		return Height;
 	}
 
-	void ClearAndTransitionToPresent(FDevice& Device, FCmdBuffer* CmdBuffer, struct FDescriptorPool* DescriptorPool);
+	//void ClearAndTransitionToPresent(FDevice& Device, FCmdBuffer* CmdBuffer, struct FDescriptorPool* DescriptorPool);
 
 	void Present(ID3D12CommandQueue* Queue)
 	{
