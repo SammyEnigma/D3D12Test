@@ -1,6 +1,5 @@
 *.tlog
 *.pdb
-*.obj
 *.db
 *.opendb
 *.ilk
@@ -12,6 +11,17 @@ vc*.idb
 *.suo
 Test0.res
 x64
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+build/
+bld/
+[Bb]in/
+[Oo]bj/
 
 # Windows image file caches
 Thumbs.db
