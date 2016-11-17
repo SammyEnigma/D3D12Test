@@ -461,52 +461,68 @@ struct FSampler
 		Sampler = VK_NULL_HANDLE;
 	}
 };
+#endif
 
 struct FShader
 {
-	bool Create(const char* Filename, VkDevice Device)
+	bool Create(const char* Filename, FDevice& Device, const char* Profile)
 	{
-		SpirV = LoadFile(Filename);
-		if (SpirV.empty())
+/*
+		std::wstring FilenameW;
+		{
+			while (*Filename)
+			{
+				FilenameW += *Filename++;
+			}
+		}
+		uint32 Flags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+		checkD3D12(D3DCompileFromFile(FilenameW.c_str(), nullptr, nullptr, (LPCSTR)"Main", (LPCSTR)Profile, Flags, 0, &UCode, nullptr));
+		return true;
+*/
+		SourceCode = LoadFile(Filename);
+		if (SourceCode.empty())
 		{
 			return false;
 		}
 
-		VkShaderModuleCreateInfo CreateInfo;
-		MemZero(CreateInfo);
-		CreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-		check(SpirV.size() % 4 == 0);
-		CreateInfo.codeSize = SpirV.size();
-		CreateInfo.pCode = (uint32*)&SpirV[0];
-
-		checkVk(vkCreateShaderModule(Device, &CreateInfo, nullptr, &ShaderModule));
+		uint32 Flags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+		Microsoft::WRL::ComPtr<ID3DBlob> Errors;
+		if (FAILED(D3DCompile(&SourceCode[0], SourceCode.size(), nullptr, nullptr, nullptr, (LPCSTR)"Main", (LPCSTR)Profile, 0, 0, &UCode, &Errors)))
+		{
+			char* ErrorA = (char*)Errors->GetBufferPointer();
+			::OutputDebugStringA(ErrorA);
+			::OutputDebugStringA("\n");
+			check(0);
+		}
 		return true;
 	}
 
-	void Destroy(VkDevice Device)
+	void Destroy()
 	{
-		vkDestroyShaderModule(Device, ShaderModule, nullptr);
-		ShaderModule = VK_NULL_HANDLE;
 	}
 
-	std::vector<char> SpirV;
-	VkShaderModule ShaderModule = VK_NULL_HANDLE;
+	std::vector<char> SourceCode;
+	Microsoft::WRL::ComPtr<ID3DBlob> UCode;
 };
 
 struct FPSO
 {
+#if ENABLE_VULKAN
 	virtual void SetupLayoutBindings(std::vector<VkDescriptorSetLayoutBinding>& OutBindings)
 	{
 	}
-
-	virtual void Destroy(VkDevice Device)
+#endif
+	virtual void Destroy()
 	{
+#if ENABLE_VULKAN
 		if (DSLayout != VK_NULL_HANDLE)
 		{
 			vkDestroyDescriptorSetLayout(Device, DSLayout, nullptr);
 		}
+#endif
 	}
 
+#if ENABLE_VULKAN
 	void CreateDescriptorSetLayout(VkDevice Device)
 	{
 		std::vector<VkDescriptorSetLayoutBinding> DSBindings;
@@ -525,36 +541,39 @@ struct FPSO
 	virtual void SetupShaderStages(std::vector<VkPipelineShaderStageCreateInfo>& OutShaderStages)
 	{
 	}
+#endif
 };
 
 struct FGfxPSO : public FPSO
 {
 	FShader VS;
 	FShader PS;
-
-	virtual void Destroy(VkDevice Device) override
+	virtual void Destroy() override
 	{
-		FPSO::Destroy(Device);
-		PS.Destroy(Device);
-		VS.Destroy(Device);
+		FPSO::Destroy();
+		PS.Destroy();
+		VS.Destroy();
 	}
 
-	bool CreateVSPS(VkDevice Device, const char* VSFilename, const char* PSFilename)
+	bool CreateVSPS(FDevice& Device, const char* VSFilename, const char* PSFilename)
 	{
-		if (!VS.Create(VSFilename, Device))
+		if (!VS.Create(VSFilename, Device, "vs_5_0"))
 		{
 			return false;
 		}
 
-		if (!PS.Create(PSFilename, Device))
+		if (!PS.Create(PSFilename, Device, "ps_5_0"))
 		{
 			return false;
 		}
 
+#if ENABLE_VULKAN
 		CreateDescriptorSetLayout(Device);
+#endif
 		return true;
 	}
 
+#if ENABLE_VULKAN
 	inline void AddBinding(std::vector<VkDescriptorSetLayoutBinding>& OutBindings, VkShaderStageFlags Stage, int32 Binding, VkDescriptorType DescType, uint32 NumDescriptors = 1)
 	{
 		VkDescriptorSetLayoutBinding NewBinding;
@@ -586,8 +605,8 @@ struct FGfxPSO : public FPSO
 			OutShaderStages.push_back(Info);
 		}
 	}
-};
 #endif
+};
 
 struct FVertexFormat
 {

@@ -268,18 +268,20 @@ FVertexFormat GPosColorUVFormat;
 
 bool GQuitting = false;
 
-#if ENABLE_VULKAN
 struct FTestPSO : public FGfxPSO
 {
+#if ENABLE_VULKAN
 	virtual void SetupLayoutBindings(std::vector<VkDescriptorSetLayoutBinding>& OutBindings) override
 	{
 		AddBinding(OutBindings, VK_SHADER_STAGE_VERTEX_BIT, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 		AddBinding(OutBindings, VK_SHADER_STAGE_VERTEX_BIT, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 		AddBinding(OutBindings, VK_SHADER_STAGE_FRAGMENT_BIT, 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 	}
+#endif
 };
 FTestPSO GTestPSO;
 
+#if ENABLE_VULKAN
 struct FOneImagePSO : public FComputePSO
 {
 	virtual void SetupLayoutBindings(std::vector<VkDescriptorSetLayoutBinding>& OutBindings) override
@@ -587,7 +589,9 @@ static bool LoadShadersAndGeometry()
 	}
 	else
 	{
-		check(GTestPSO.CreateVSPS(GDevice.Device, "../Shaders/Test0.vert.spv", "../Shaders/Test0.frag.spv"));
+#endif
+		check(GTestPSO.CreateVSPS(GDevice, "../Shaders/TestVS.hlsl", "../Shaders/TestPS.hlsl"));
+#if ENABLE_VULKAN
 		check(GTestComputePSO.Create(GDevice.Device, "../Shaders/Test0.comp.spv"));
 		check(GTestComputePostPSO.Create(GDevice.Device, "../Shaders/TestPost.comp.spv"));
 		check(GFillTexturePSO.Create(GDevice.Device, "../Shaders/FillTexture.comp.spv"));
@@ -1175,10 +1179,12 @@ void DoDeinit()
 	GHeightMap.Destroy();
 #endif
 	GDescriptorPool.Destroy();
-#if 0
+#if ENABLE_VULKAN
 	GTestComputePostPSO.Destroy(GDevice.Device);
 	GTestComputePSO.Destroy(GDevice.Device);
-	GTestPSO.Destroy(GDevice.Device);
+#endif
+	GTestPSO.Destroy();
+#if ENABLE_VULKAN
 	GSetupFloorPSO.Destroy(GDevice.Device);
 	GFillTexturePSO.Destroy(GDevice.Device);
 

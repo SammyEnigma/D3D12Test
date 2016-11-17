@@ -35,7 +35,13 @@ inline std::vector<char> LoadFile(const char* Filename)
 	Data.resize(Size);
 	fread(&Data[0], 1, Size, File);
 	fclose(File);
-
+	/*
+	std::vector<wchar_t> OutData;
+	for (auto c : Data)
+	{
+		OutData.push_back(c);
+	}
+	*/
 	return Data;
 }
 
