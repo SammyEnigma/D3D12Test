@@ -59,13 +59,27 @@ struct FBuffer
 	{
 		return SubAlloc->GetBindOffset();
 	}
+#endif
+
+	void* Map()
+	{
+		D3D12_RANGE ReadRange;
+		MemZero(ReadRange);
+		void* Data;
+		checkD3D12(Buffer->Map(0, &ReadRange, &Data));
+		return Data;
+	}
+
+	void Unmap()
+	{
+		Buffer->Unmap(0, nullptr);
+	}
 
 	uint64 GetSize() const
 	{
 		return Size;
 	}
 
-#endif
 	Microsoft::WRL::ComPtr<ID3D12Resource> Buffer;
 	uint64 Size = 0;
 #if ENABLE_VULKAN
@@ -128,21 +142,31 @@ inline void CmdBind(FCmdBuffer* CmdBuffer, FVertexBuffer* VB)
 	CmdBuffer->CommandList->IASetVertexBuffers(0, 1, &VB->View);
 }
 
-#if ENABLE_VULKAN
 template <typename TStruct>
 struct FUniformBuffer
 {
-	void Create(VkDevice InDevice, FMemManager* MemMgr,
+	void Create(FDevice& InDevice, FMemManager& MemMgr
+#if ENABLE_VULKAN
+		,
 		VkBufferUsageFlags InUsageFlags = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-		VkMemoryPropertyFlags MemPropertyFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+		VkMemoryPropertyFlags MemPropertyFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+#endif
+	)
 	{
+#if ENABLE_VULKAN
 		VkBufferUsageFlags UsageFlags = InUsageFlags | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-		Buffer.Create(InDevice, sizeof(TStruct), UsageFlags, MemPropertyFlags, MemMgr);
+#endif
+		Buffer.Create(InDevice, sizeof(TStruct));//, UsageFlags, MemPropertyFlags, MemMgr);
 	}
 
-	TStruct* GetMappedData()
+	TStruct* Map()
 	{
-		return (TStruct*)Buffer.GetMappedData();
+		return (TStruct*)Buffer.Map();
+	}
+
+	void Unmap()
+	{
+		Buffer.Unmap();
 	}
 
 	void Destroy()
@@ -152,7 +176,6 @@ struct FUniformBuffer
 
 	FBuffer Buffer;
 };
-#endif
 
 struct FImage
 {

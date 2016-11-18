@@ -5,7 +5,16 @@ struct FVSOut
 	float4 Color : COLOR;
 };
 
-FVSOut Main(float3 Pos : POSITION, uint VertexID : SV_VertexID)
+#define USE_VIEW_UB	0
+#if USE_VIEW_UB
+cbuffer ViewUB
+{
+	float4x4 Proj;
+	float4x4 View;
+};
+#endif
+
+FVSOut Main(float3 Pos : POSITION, float2 UV : TEXCOORD0, uint VertexID : SV_VertexID)
 {
 	//float3 P[3] =
 	//{
@@ -28,6 +37,7 @@ FVSOut Main(float3 Pos : POSITION, uint VertexID : SV_VertexID)
 	//Out.Pos = float4(P[VertexID % 3], 1);
 	Out.Pos = float4(Pos, 1);
 
+	#if !USE_VIEW_UB
 	#if 1
 	float4x4 Proj =	
 	{
@@ -45,7 +55,17 @@ FVSOut Main(float3 Pos : POSITION, uint VertexID : SV_VertexID)
 		{0.5, 0, 0, 1}
 	};
 	#endif
+	#endif
+	float4x4 View =	
+	{
+		{1, 0, 0 ,0},
+		{0, 1, 0 ,0},
+		{0, 0, 1, 0},
+		{0, 0, 2.5, 1}
+	};
+	Out.Pos = mul(Out.Pos, View);
 	Out.Pos = mul(Out.Pos, Proj);
+	Out.UVs = UV;
 	
 	return Out;
 }

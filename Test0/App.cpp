@@ -53,14 +53,14 @@ struct FCreateFloorUB
 	float Elevation;
 };
 static FUniformBuffer<FCreateFloorUB> GCreateFloorUB;
-
+#endif
 struct FViewUB
 {
 	FMatrix4x4 View;
 	FMatrix4x4 Proj;
 };
 static FUniformBuffer<FViewUB> GViewUB;
-
+#if ENABLE_VULKAN
 struct FObjUB
 {
 	FMatrix4x4 Obj;
@@ -446,9 +446,7 @@ struct FObjectCache
 		}
 
 		auto* NewPipeline = new FGfxPipeline;
-#if ENABLE_VULKAN
-		NewPipeline->RSInfo.polygonMode = bWireframe ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
-#endif
+		NewPipeline->Desc.RasterizerState.FillMode = bWireframe ? D3D12_FILL_MODE_WIREFRAME : D3D12_FILL_MODE_SOLID;
 		NewPipeline->Create(Device, GfxPSO, VF/*, Width, Height, RenderPass*/);
 		GfxPipelines[Layout] = NewPipeline;
 		return NewPipeline;
@@ -525,10 +523,7 @@ template <typename TFillLambda>
 void MapAndFillBufferSyncOneShotCmdBuffer(FDevice& Device, FBuffer* DestBuffer, TFillLambda Fill, uint32 Size)
 {
 	// HACK!
-	D3D12_RANGE ReadRange;
-	MemZero(ReadRange);
-	void* Data;
-	checkD3D12(DestBuffer->Buffer->Map(0, &ReadRange, &Data));
+	void* Data = DestBuffer->Map();
 #if ENABLE_VULKAN
 	auto* CmdBuffer = GCmdBufferMgr.AllocateCmdBuffer(Device);
 	CmdBuffer->Begin();
@@ -542,7 +537,7 @@ void MapAndFillBufferSyncOneShotCmdBuffer(FDevice& Device, FBuffer* DestBuffer, 
 	GCmdBufferMgr.Submit(CmdBuffer, GDevice.PresentQueue, nullptr, nullptr);
 	CmdBuffer->WaitForFence();
 #endif
-	DestBuffer->Buffer->Unmap(0, nullptr);
+	DestBuffer->Unmap();
 }
 
 static bool LoadShadersAndGeometry()
@@ -637,19 +632,6 @@ static bool LoadShadersAndGeometry()
 
 	auto FillObj = [](void* Data)
 	{
-		FVector3 P[3] =
-		{
-#if 0
-			{0, 0.4444, 0},
-			{0.25, -0.4444, 0},
-			{-0.25, -0.4444, 0},
-#else
-			{-0.5, -0.1, 1},
-			{0.1, -0.1, 1},
-			{0, 0.5, 1},
-#endif
-		};
-
 		check(Data);
 		auto* Vertex = (FPosColorUVVertex*)Data;
 		for (uint32 Index = 0; Index < GObj.Faces.size(); ++Index)
@@ -663,10 +645,7 @@ static bool LoadShadersAndGeometry()
 				Vertex->Color = PackNormalToU32(GObj.VNs[Face.Corners[Corner].Normal]);
 				Vertex->u = GObj.VTs[Face.Corners[Corner].UV].u;
 				Vertex->v = GObj.VTs[Face.Corners[Corner].UV].v;
-				Vertex->x = P[Corner].x;
-				Vertex->y = P[Corner].y;
-				Vertex->z = P[Corner].z;
-++Vertex;
+				++Vertex;
 			}
 		}
 	};
@@ -839,8 +818,8 @@ bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 	{
 		return false;
 	}
+	GViewUB.Create(GDevice, GMemMgr);
 #if ENABLE_VULKAN
-	GViewUB.Create(GDevice.Device, &GMemMgr);
 	GObjUB.Create(GDevice.Device, &GMemMgr);
 	GIdentityUB.Create(GDevice.Device, &GMemMgr);
 
@@ -931,30 +910,15 @@ static void SetDynamicStates(FCmdBuffer* CmdBuffer, uint32 Width, uint32 Height)
 
 static void UpdateCamera()
 {
-#if ENABLE_VULKAN
-	FViewUB& ViewUB = *GViewUB.GetMappedData();
+	FViewUB& ViewUB = *GViewUB.Map();
 	ViewUB.View = FMatrix4x4::GetIdentity();
 	//ViewUB.View.Values[3 * 4 + 2] = -10;
-#endif
 	GCameraPos = GCameraPos.Add(GControl.StepDirection.Mul(0.01f));
 	GRequestControl.StepDirection = {0, 0, 0};
 	GControl.StepDirection ={0, 0, 0};
-#if ENABLE_VULKAN
 	ViewUB.View.Rows[3] = GCameraPos;
-	ViewUB.Proj = 
-#endif
-		auto A = CalculateProjectionMatrix(ToRadians(60), (float)GSwapchain.GetWidth() / (float)GSwapchain.GetHeight(), 0.1f, 1000.0f);
-	A =A;
-
-	FVector4 P[3] =
-	{
-		{-0.5, -0.1, 0, 1},
-		{0.1, -0.1, 0, 1},
-		{0, 0.5, 0, 1},
-	};
-	auto a0 = A.Transform(P[0]);
-	auto a1 = A.Transform(P[1]);
-	auto a2 = A.Transform(P[2]);
+	ViewUB.Proj = CalculateProjectionMatrix(ToRadians(60), (float)GSwapchain.GetWidth() / (float)GSwapchain.GetHeight(), 0.1f, 1000.0f);
+	GViewUB.Unmap();
 }
 
 static void InternalRenderFrame(FDevice* Device, /*FRenderPass* RenderPass, */FCmdBuffer* CmdBuffer, uint32 Width, uint32 Height)
@@ -1213,7 +1177,9 @@ void DoDeinit()
 #if ENABLE_VULKAN
 	GFloorIB.Destroy();
 	GFloorVB.Destroy();
+#endif
 	GViewUB.Destroy();
+#if ENABLE_VULKAN
 	GCreateFloorUB.Destroy();
 	GObjUB.Destroy();
 #endif
