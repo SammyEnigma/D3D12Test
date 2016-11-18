@@ -637,6 +637,13 @@ static bool LoadShadersAndGeometry()
 
 	auto FillObj = [](void* Data)
 	{
+		FVector3 P[3] =
+		{
+			{0, 0.4444, 0},
+			{0.25, -0.4444, 0},
+			{-0.25, -0.4444, 0},
+		};
+
 		check(Data);
 		auto* Vertex = (FPosColorUVVertex*)Data;
 		for (uint32 Index = 0; Index < GObj.Faces.size(); ++Index)
@@ -650,7 +657,10 @@ static bool LoadShadersAndGeometry()
 				Vertex->Color = PackNormalToU32(GObj.VNs[Face.Corners[Corner].Normal]);
 				Vertex->u = GObj.VTs[Face.Corners[Corner].UV].u;
 				Vertex->v = GObj.VTs[Face.Corners[Corner].UV].v;
-				++Vertex;
+Vertex->x = P[Corner].x;
+Vertex->y = P[Corner].y;
+Vertex->z = P[Corner].z;
+++Vertex;
 			}
 		}
 	};

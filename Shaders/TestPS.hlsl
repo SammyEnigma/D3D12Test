@@ -11,5 +11,5 @@ SamplerState Sampler;
 */
 float4 Main(/*FVSOut In*/) : SV_Target0
 {
-	return float4(1, 0, 0, 1);//Texture.Sample(Sampler, UVs);// * ColorIn;
+	return float4(1, 0.5, 0, 1);//Texture.Sample(Sampler, UVs);// * ColorIn;
 }
