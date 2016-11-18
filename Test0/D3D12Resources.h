@@ -123,13 +123,12 @@ struct FVertexBuffer
 	D3D12_VERTEX_BUFFER_VIEW View;
 };
 
-#if ENABLE_VULKAN
 inline void CmdBind(FCmdBuffer* CmdBuffer, FVertexBuffer* VB)
 {
-	VkDeviceSize Offset = 0;
-	vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, 1, &VB->Buffer.Buffer, &Offset);
+	CmdBuffer->CommandList->IASetVertexBuffers(0, 1, &VB->View);
 }
 
+#if ENABLE_VULKAN
 template <typename TStruct>
 struct FUniformBuffer
 {
@@ -643,6 +642,7 @@ struct FVertexFormat
 	std::vector<D3D12_INPUT_CLASSIFICATION> InputRates;
 	std::vector<uint32> Strides;
 	std::vector<D3D12_INPUT_ELEMENT_DESC> VertexAttributes;
+	std::vector<std::string> SemanticNames;
 
 	void AddVertexBuffer(uint32 Binding, uint32 Stride, D3D12_INPUT_CLASSIFICATION InputRate)
 	{
@@ -651,7 +651,7 @@ struct FVertexFormat
 		Strides.push_back(Stride);
 	}
 
-	void AddVertexAttribute(uint32 Binding, uint32 Location, DXGI_FORMAT Format, uint32 Offset)
+	void AddVertexAttribute(const char* InSemanticName, uint32 Binding, uint32 Location, DXGI_FORMAT Format, uint32 Offset)
 	{
 		D3D12_INPUT_ELEMENT_DESC VIADesc;
 		MemZero(VIADesc);
@@ -659,7 +659,10 @@ struct FVertexFormat
 		VIADesc.InputSlot = Binding;
 		VIADesc.InputSlotClass = InputRates[Binding];
 		VIADesc.AlignedByteOffset = Offset;
+		VIADesc.SemanticName = InSemanticName;
 		VertexAttributes.push_back(VIADesc);
+		check(InSemanticName);
+		SemanticNames.push_back(InSemanticName);
 	}
 
 #if ENABLE_VULKAN
@@ -676,6 +679,12 @@ struct FVertexFormat
 		return VIInfo;
 	}
 #endif
+
+	void SetCreateInfo(D3D12_GRAPHICS_PIPELINE_STATE_DESC& OutDesc)
+	{
+		OutDesc.InputLayout.NumElements = (uint32)VertexAttributes.size();
+		OutDesc.InputLayout.pInputElementDescs = VertexAttributes.empty() ? 0 : &VertexAttributes[0];
+	}
 };
 
 class FGfxPSOLayout
@@ -1354,3 +1363,8 @@ inline void BlitColorImage(FCmdBuffer* CmdBuffer, uint32 Width, uint32 Height, V
 };
 #endif
 
+inline void CmdBind(FCmdBuffer* CmdBuffer, FGfxPipeline * GfxPipeline)
+{
+	CmdBuffer->CommandList->SetPipelineState(GfxPipeline->PipelineState.Get());
+	CmdBuffer->CommandList->SetGraphicsRootSignature(GfxPipeline->Desc.pRootSignature);
+}

@@ -622,9 +622,9 @@ static bool LoadShadersAndGeometry()
 
 	// Setup Vertex Format
 	GPosColorUVFormat.AddVertexBuffer(0, sizeof(FPosColorUVVertex), D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA);
-	GPosColorUVFormat.AddVertexAttribute(0, 0, DXGI_FORMAT_R32G32B32_FLOAT, offsetof(FPosColorUVVertex, x));
-	GPosColorUVFormat.AddVertexAttribute(0, 1, DXGI_FORMAT_R8G8B8A8_UNORM, offsetof(FPosColorUVVertex, Color));
-	GPosColorUVFormat.AddVertexAttribute(0, 2, DXGI_FORMAT_R32G32_FLOAT, offsetof(FPosColorUVVertex, u));
+	GPosColorUVFormat.AddVertexAttribute("POSITION", 0, 0, DXGI_FORMAT_R32G32B32_FLOAT, offsetof(FPosColorUVVertex, x));
+	GPosColorUVFormat.AddVertexAttribute("COLOR", 0, 1, DXGI_FORMAT_R8G8B8A8_UNORM, offsetof(FPosColorUVVertex, Color));
+	GPosColorUVFormat.AddVertexAttribute("TEXCOORD", 0, 2, DXGI_FORMAT_R32G32_FLOAT, offsetof(FPosColorUVVertex, u));
 
 	// Load and fill geometry
 	if (!Obj::Load("../Meshes/Cube/cube.obj", GObj))
@@ -855,10 +855,6 @@ bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 
 static void DrawCube(/*FGfxPipeline* GfxPipeline, */FDevice* Device, FCmdBuffer* CmdBuffer)
 {
-	CmdBuffer->CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	CmdBuffer->CommandList->IASetVertexBuffers(0, 1, &GObjVB.View);
-	CmdBuffer->CommandList->DrawInstanced(3, 1, 0, 0);
-
 #if ENABLE_VULKAN
 	FObjUB& ObjUB = *GObjUB.GetMappedData();
 	static float AngleDegrees = 0;
@@ -878,9 +874,10 @@ static void DrawCube(/*FGfxPipeline* GfxPipeline, */FDevice* Device, FCmdBuffer*
 
 	vkCmdBindDescriptorSets(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, GfxPipeline->PipelineLayout, 0, 1, &DescriptorSet, 0, nullptr);
 
-	CmdBind(CmdBuffer, &GObjVB);
-	vkCmdDraw(CmdBuffer->CmdBuffer, (uint32)GObj.Faces.size() * 3, 1, 0, 0);
 #endif
+	CmdBuffer->CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	CmdBind(CmdBuffer, &GObjVB);
+	CmdBuffer->CommandList->DrawInstanced((uint32)GObj.Faces.size() * 3, 1, 0, 0);
 }
 
 #if ENABLE_VULKAN
@@ -900,23 +897,21 @@ static void DrawFloor(FGfxPipeline* GfxPipeline, VkDevice Device, FCmdBuffer* Cm
 	CmdBind(CmdBuffer, &GFloorIB);
 	vkCmdDrawIndexed(CmdBuffer->CmdBuffer, GFloorIB.NumIndices, 1, 0, 0, 0);
 }
-
-static void SetDynamicStates(VkCommandBuffer CmdBuffer, uint32 Width, uint32 Height)
-{
-	VkViewport Viewport;
-	MemZero(Viewport);
-	Viewport.width = (float)Width;
-	Viewport.height = (float)Height;
-	Viewport.maxDepth = 1;
-	vkCmdSetViewport(CmdBuffer, 0, 1, &Viewport);
-
-	VkRect2D Scissor;
-	MemZero(Scissor);
-	Scissor.extent.width = Width;
-	Scissor.extent.height = Height;
-	vkCmdSetScissor(CmdBuffer, 0, 1, &Scissor);
-}
 #endif
+
+static void SetDynamicStates(FCmdBuffer* CmdBuffer, uint32 Width, uint32 Height)
+{
+	D3D12_VIEWPORT Viewport;
+	MemZero(Viewport);
+	Viewport.Width = (float)Width;
+	Viewport.Height = (float)Height;
+	CmdBuffer->CommandList->RSSetViewports(1, &Viewport);
+	D3D12_RECT Scissor;
+	MemZero(Scissor);
+	Scissor.right = Width;
+	Scissor.bottom = Height;
+	CmdBuffer->CommandList->RSSetScissorRects(1, &Scissor);
+}
 
 static void UpdateCamera()
 {
@@ -938,24 +933,10 @@ static void InternalRenderFrame(FDevice* Device, /*FRenderPass* RenderPass, */FC
 {
 	auto* GfxPipeline = GObjectCache.GetOrCreateGfxPipeline(&GTestPSO, &GPosColorUVFormat, /*Width, Height, RenderPass, */GControl.ViewMode == EViewMode::Wireframe);
 
-	CmdBuffer->CommandList->SetPipelineState(GfxPipeline->PipelineState.Get());
-	CmdBuffer->CommandList->SetGraphicsRootSignature(GfxPipeline->Desc.pRootSignature);
-	D3D12_VIEWPORT Viewport;
-	MemZero(Viewport);
-	Viewport.Width = (float)Width;
-	Viewport.Height = (float)Height;
-	CmdBuffer->CommandList->RSSetViewports(1, &Viewport);
-	D3D12_RECT Scissor;
-	MemZero(Scissor);
-	Scissor.right = Width;
-	Scissor.bottom = Height;
-	CmdBuffer->CommandList->RSSetScissorRects(1, &Scissor);
+	CmdBind(CmdBuffer, GfxPipeline);
 
+	SetDynamicStates(CmdBuffer, Width, Height);
 #if ENABLE_VULKAN
-	vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, GfxPipeline->Pipeline);
-
-	SetDynamicStates(CmdBuffer->CmdBuffer, Width, Height);
-
 	DrawFloor(GfxPipeline, Device, CmdBuffer);
 #endif
 	DrawCube(/*GfxPipeline, */Device, CmdBuffer);
@@ -964,8 +945,8 @@ static void InternalRenderFrame(FDevice* Device, /*FRenderPass* RenderPass, */FC
 static void RenderFrame(FDevice* Device, FCmdBuffer* CmdBuffer, FImage2DWithView* ColorBuffer/*, FImage2DWithView* DepthBuffer, FImage2DWithView* ResolveColorBuffer*/)
 {
 	UpdateCamera();
-#if ENABLE_VULKAN
 
+#if ENABLE_VULKAN
 	FillFloor(CmdBuffer);
 
 	VkFormat ColorFormat = ColorBuffer->GetFormat();
@@ -974,6 +955,7 @@ static void RenderFrame(FDevice* Device, FCmdBuffer* CmdBuffer, FImage2DWithView
 
 	CmdBuffer->BeginRenderPass(RenderPass->RenderPass, *Framebuffer, TRY_MULTITHREADED == 1);
 #endif
+	CmdBuffer->CommandList->OMSetRenderTargets(1, &GSwapchain.GetAcquiredImageView(), false, nullptr);
 #if TRY_MULTITHREADED == 1
 	{
 		GThread.ParentCmdBuffer = CmdBuffer;

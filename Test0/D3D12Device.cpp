@@ -327,19 +327,16 @@ void FGfxPipeline::Create(FDevice* Device, FGfxPSO* PSO, FVertexFormat* VertexFo
 #endif
 )
 {
+	Desc.pRootSignature = PSO->RootSignature.Get();
+
+	Desc.VS.pShaderBytecode = PSO->VS.UCode->GetBufferPointer();
+	Desc.VS.BytecodeLength = PSO->VS.UCode->GetBufferSize();
+	Desc.PS.pShaderBytecode = PSO->PS.UCode->GetBufferPointer();
+	Desc.PS.BytecodeLength = PSO->PS.UCode->GetBufferSize();
+
+	VertexFormat->SetCreateInfo(Desc);
+
 #if ENABLE_VULKAN
-	std::vector<VkPipelineShaderStageCreateInfo> ShaderStages;
-	PSO->SetupShaderStages(ShaderStages);
-
-	VkPipelineLayoutCreateInfo CreateInfo;
-	MemZero(CreateInfo);
-	CreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-	CreateInfo.setLayoutCount = 1;
-	CreateInfo.pSetLayouts = &PSO->DSLayout;
-	checkVk(vkCreatePipelineLayout(Device, &CreateInfo, nullptr, &PipelineLayout));
-
-	VkPipelineVertexInputStateCreateInfo VIInfo = VertexFormat->GetCreateInfo();
-
 	//Viewport.x = 0;
 	//Viewport.y = 0;
 	Viewport.width = (float)Width;
@@ -367,20 +364,7 @@ void FGfxPipeline::Create(FDevice* Device, FGfxPSO* PSO, FVertexFormat* VertexFo
 	PipelineInfo.pColorBlendState = &CBInfo;
 	PipelineInfo.pDynamicState = &DynamicInfo;
 	PipelineInfo.layout = PipelineLayout;
-	PipelineInfo.renderPass = RenderPass->RenderPass;
-	//PipelineInfo.subpass = 0;
-	//PipelineInfo.basePipelineHandle = NULL;
-	//PipelineInfo.basePipelineIndex = 0;
-
-	checkVk(vkCreateGraphicsPipelines(Device, VK_NULL_HANDLE, 1, &PipelineInfo, nullptr, &Pipeline));
 #endif
-	//Desc.InputLayout ={inputElementDescs, _countof(inputElementDescs)};
-	Desc.pRootSignature = PSO->RootSignature.Get();
-
-	Desc.VS.pShaderBytecode = PSO->VS.UCode->GetBufferPointer();
-	Desc.VS.BytecodeLength = PSO->VS.UCode->GetBufferSize();
-	Desc.PS.pShaderBytecode = PSO->PS.UCode->GetBufferPointer();
-	Desc.PS.BytecodeLength = PSO->PS.UCode->GetBufferSize();
 
 	Desc.DepthStencilState.DepthEnable = FALSE;
 	Desc.DepthStencilState.StencilEnable = FALSE;
