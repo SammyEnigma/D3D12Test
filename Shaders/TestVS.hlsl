@@ -14,6 +14,11 @@ cbuffer ViewUB
 };
 #endif
 
+cbuffer ObjUB
+{
+	float4x4 Obj;
+};
+
 FVSOut Main(float3 Pos : POSITION, float2 UV : TEXCOORD0, uint VertexID : SV_VertexID)
 {
 	//float3 P[3] =
@@ -56,6 +61,8 @@ FVSOut Main(float3 Pos : POSITION, float2 UV : TEXCOORD0, uint VertexID : SV_Ver
 	};
 	#endif
 	#endif
+
+	Out.Pos = mul(Out.Pos, Obj);
 	
 	#if USE_VIEW_UB
 	Out.Pos = mul(View, Out.Pos);

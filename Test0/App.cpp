@@ -60,7 +60,6 @@ struct FViewUB
 	FMatrix4x4 Proj;
 };
 static FUniformBuffer<FViewUB> GViewUB;
-#if ENABLE_VULKAN
 struct FObjUB
 {
 	FMatrix4x4 Obj;
@@ -68,6 +67,7 @@ struct FObjUB
 static FUniformBuffer<FObjUB> GObjUB;
 static FUniformBuffer<FObjUB> GIdentityUB;
 
+#if ENABLE_VULKAN
 static FImage2DWithView GCheckerboardTexture;
 static FImage2DWithView GHeightMap;
 static FSampler GSampler;
@@ -287,24 +287,11 @@ struct FTestPSO : public FGfxPSO
 {
 	virtual void SetupLayoutBindings(std::vector<D3D12_ROOT_PARAMETER>& OutRootParameters, std::vector<D3D12_DESCRIPTOR_RANGE>& OutRanges) override
 	{
-		auto RangeIndex = OutRanges.size();
-		D3D12_DESCRIPTOR_RANGE Range;
-		MemZero(Range);
-		Range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-		Range.NumDescriptors = 1;
-		Range.BaseShaderRegister = 0;
-		Range.RegisterSpace = 0;
-		//Range.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC;
-		Range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-		OutRanges.push_back(Range);
+		AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_CBV);
+		AddRange(OutRanges, 1, D3D12_DESCRIPTOR_RANGE_TYPE_CBV);
 
-		D3D12_ROOT_PARAMETER RootParam;
-		MemZero(RootParam);
-		RootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-		RootParam.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
-		RootParam.DescriptorTable.NumDescriptorRanges = 1;
-		RootParam.DescriptorTable.pDescriptorRanges = &OutRanges[RangeIndex];
-		OutRootParameters.push_back(RootParam);
+		AddRootParam(OutRootParameters, OutRanges, 0, D3D12_SHADER_VISIBILITY_VERTEX);
+		AddRootParam(OutRootParameters, OutRanges, 1, D3D12_SHADER_VISIBILITY_VERTEX);
 
 #if ENABLE_VULKAN
 		AddBinding(OutBindings, VK_SHADER_STAGE_VERTEX_BIT, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
@@ -838,20 +825,22 @@ bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 		return false;
 	}
 	GViewUB.Create(GDevice, GDescriptorPool);
-#if ENABLE_VULKAN
-	GObjUB.Create(GDevice.Device, &GMemMgr);
-	GIdentityUB.Create(GDevice.Device, &GMemMgr);
+
+	GObjUB.Create(GDevice, GDescriptorPool);
+	GIdentityUB.Create(GDevice, GDescriptorPool);
 
 	{
-		FObjUB& ObjUB = *GObjUB.GetMappedData();
+		FObjUB& ObjUB = *GObjUB.Map();
 		ObjUB.Obj = FMatrix4x4::GetIdentity();
+		GObjUB.Unmap();
 	}
 
 	{
-		FObjUB& ObjUB = *GIdentityUB.GetMappedData();
+		FObjUB& ObjUB = *GIdentityUB.Map();
 		ObjUB.Obj = FMatrix4x4::GetIdentity();
+		GIdentityUB.Unmap();
 	}
-#endif
+
 	GRenderTargetPool.Create();//GDevice.Device, &GMemMgr);
 
 #if ENABLE_VULKAN
@@ -869,15 +858,17 @@ bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 
 static void DrawCube(/*FGfxPipeline* GfxPipeline, */FDevice* Device, FCmdBuffer* CmdBuffer)
 {
-#if ENABLE_VULKAN
-	FObjUB& ObjUB = *GObjUB.GetMappedData();
-	static float AngleDegrees = 0;
 	{
-		AngleDegrees += 360.0f / 10.0f / 60.0f;
-		AngleDegrees = fmod(AngleDegrees, 360.0f);
+		FObjUB& ObjUB = *GObjUB.Map();
+		static float AngleDegrees = 0;
+		{
+			AngleDegrees += 360.0f / 10.0f / 60.0f;
+			AngleDegrees = fmod(AngleDegrees, 360.0f);
+		}
+		ObjUB.Obj = FMatrix4x4::GetRotationY(ToRadians(AngleDegrees));
+		GObjUB.Unmap();
 	}
-	ObjUB.Obj = FMatrix4x4::GetRotationY(ToRadians(AngleDegrees));
-
+#if ENABLE_VULKAN
 	auto DescriptorSet = GDescriptorPool.AllocateDescriptorSet(GTestPSO.DSLayout);
 
 	FWriteDescriptors WriteDescriptors;
@@ -888,7 +879,7 @@ static void DrawCube(/*FGfxPipeline* GfxPipeline, */FDevice* Device, FCmdBuffer*
 
 	vkCmdBindDescriptorSets(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, GfxPipeline->PipelineLayout, 0, 1, &DescriptorSet, 0, nullptr);
 #endif
-	ID3D12DescriptorHeap* ppHeaps[] ={GDescriptorPool.CSUHeap.Get()};
+	ID3D12DescriptorHeap* ppHeaps[] = {GDescriptorPool.CSUHeap.Get()};
 	CmdBuffer->CommandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
 	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(0, GDescriptorPool.CSUGPUStart);
 	CmdBuffer->CommandList->SetGraphicsRootSignature(GTestPSO.RootSignature.Get());
@@ -1204,12 +1195,11 @@ void DoDeinit()
 	GViewUB.Destroy();
 #if ENABLE_VULKAN
 	GCreateFloorUB.Destroy();
-	GObjUB.Destroy();
 #endif
+	GObjUB.Destroy();
 	GObjVB.Destroy();
-#if ENABLE_VULKAN
 	GIdentityUB.Destroy();
-
+#if ENABLE_VULKAN
 	GSampler.Destroy();
 
 	GCheckerboardTexture.Destroy();

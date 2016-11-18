@@ -615,18 +615,31 @@ struct FGfxPSO : public FPSO
 		return true;
 	}
 
-#if ENABLE_VULKAN
-	inline void AddBinding(std::vector<VkDescriptorSetLayoutBinding>& OutBindings, VkShaderStageFlags Stage, int32 Binding, VkDescriptorType DescType, uint32 NumDescriptors = 1)
+	inline void AddRootParam(std::vector<D3D12_ROOT_PARAMETER>& OutRootParameters, std::vector<D3D12_DESCRIPTOR_RANGE>& Ranges, int32 Binding, D3D12_SHADER_VISIBILITY Stage)
 	{
-		VkDescriptorSetLayoutBinding NewBinding;
-		MemZero(NewBinding);
-		NewBinding.binding = Binding;
-		NewBinding.descriptorType = DescType;
-		NewBinding.descriptorCount = NumDescriptors;
-		NewBinding.stageFlags = Stage;
-		OutBindings.push_back(NewBinding);
+		D3D12_ROOT_PARAMETER RootParam;
+		MemZero(RootParam);
+		RootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+		RootParam.ShaderVisibility = Stage;
+		RootParam.DescriptorTable.NumDescriptorRanges = 1;
+		RootParam.DescriptorTable.pDescriptorRanges = &Ranges[Binding];
+		OutRootParameters.push_back(RootParam);
 	}
 
+	inline void AddRange(std::vector<D3D12_DESCRIPTOR_RANGE>& OutRanges, int32 Binding, D3D12_DESCRIPTOR_RANGE_TYPE RangeType)
+	{
+		auto RangeIndex = OutRanges.size();
+		D3D12_DESCRIPTOR_RANGE Range;
+		MemZero(Range);
+		Range.RangeType = RangeType;
+		Range.NumDescriptors = 1;
+		Range.BaseShaderRegister = Binding;
+		Range.RegisterSpace = 0;
+		//Range.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC;
+		Range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+		OutRanges.push_back(Range);
+	}
+#if ENABLE_VULKAN
 	virtual void SetupShaderStages(std::vector<VkPipelineShaderStageCreateInfo>& OutShaderStages)
 	{
 		VkPipelineShaderStageCreateInfo Info;
