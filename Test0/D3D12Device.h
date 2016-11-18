@@ -341,12 +341,13 @@ struct FCmdBufferMgr
 	std::list<FCmdBuffer*> CmdBuffers;
 };
 
-#if ENABLE_VULKAN
-static inline uint32 GetFormatBitsPerPixel(VkFormat Format)
+static inline uint32 GetFormatBitsPerPixel(DXGI_FORMAT Format)
 {
 	switch (Format)
 	{
-	case VK_FORMAT_R32_SFLOAT:
+	case DXGI_FORMAT_R32_SINT:
+	case DXGI_FORMAT_R32_UINT:
+	case DXGI_FORMAT_R8G8B8A8_UNORM:
 		return 32;
 
 	default:
@@ -355,4 +356,3 @@ static inline uint32 GetFormatBitsPerPixel(VkFormat Format)
 	check(0);
 	return 0;
 }
-#endif

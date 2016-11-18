@@ -35,9 +35,7 @@ static FSwapchain GSwapchain;
 static FCmdBufferMgr GCmdBufferMgr;
 static FMemManager GMemMgr;
 static FDescriptorPool GDescriptorPool;
-#if ENABLE_VULKAN
 static FStagingManager GStagingManager;
-#endif
 
 static FVertexBuffer GObjVB;
 static Obj::FObj GObj;
@@ -663,12 +661,13 @@ void CreateAndFillTexture()
 	GHeightMap.Create(GDevice.Device, 64, 64, VK_FORMAT_R32_SFLOAT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &GMemMgr, 1);
 
 	FComputePipeline* Pipeline = GObjectCache.GetOrCreateComputePipeline(&GFillTexturePSO);
-
-	auto* CmdBuffer = GCmdBufferMgr.AllocateCmdBuffer();
+#endif
+	auto* CmdBuffer = GCmdBufferMgr.AllocateCmdBuffer(GDevice);
 	CmdBuffer->Begin();
 
+#if ENABLE_VULKAN
+	ResourceBarrier(CmdBuffer, GCheckerboardTexture.Image.Texture.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
 	ImageBarrier(CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, GCheckerboardTexture.GetImage(), VK_IMAGE_LAYOUT_UNDEFINED, 0, VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
-
 	vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline->Pipeline);
 	{
 		auto DescriptorSet = GDescriptorPool.AllocateDescriptorSet(GFillTexturePSO.DSLayout);
@@ -682,9 +681,11 @@ void CreateAndFillTexture()
 	vkCmdDispatch(CmdBuffer->CmdBuffer, GCheckerboardTexture.GetWidth() / 8, GCheckerboardTexture.GetHeight() / 8, 1);
 
 	ImageBarrier(CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, GCheckerboardTexture.GetImage(), VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+#endif
 
+	//#todo-rco: Fill in checkerboard on CS, and height with random!
 	{
-		ImageBarrier(CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, GHeightMap.GetImage(), VK_IMAGE_LAYOUT_UNDEFINED, 0, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+ResourceBarrier(CmdBuffer, GCheckerboardTexture.Image.Texture.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
 		auto FillHeightMap = [](void* Data, uint32 Width, uint32 Height)
 		{
 			float* Out = (float*)Data;
@@ -697,17 +698,21 @@ void CreateAndFillTexture()
 				}
 			}
 		};
+auto* StagingBuffer = GStagingManager.RequestUploadBufferForImage(GDevice, &GCheckerboardTexture.Image);
+MapAndFillImageSync(StagingBuffer, CmdBuffer, &GCheckerboardTexture.Image, FillHeightMap);
+#if ENABLE_VULKAN
+		ImageBarrier(CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, GHeightMap.GetImage(), VK_IMAGE_LAYOUT_UNDEFINED, 0, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
 		auto* StagingBuffer = GStagingManager.RequestUploadBufferForImage(&GHeightMap.Image);
 		MapAndFillImageSync(StagingBuffer, CmdBuffer, &GHeightMap.Image, FillHeightMap);
 		FlushMappedBuffer(GDevice.Device, StagingBuffer);
 
 		ImageBarrier(CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, GHeightMap.GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
-	}
-
-	CmdBuffer->End();
-	GCmdBufferMgr.Submit(CmdBuffer, GDevice.PresentQueue, nullptr, nullptr);
-	CmdBuffer->WaitForFence();
 #endif
+ResourceBarrier(CmdBuffer, GCheckerboardTexture.Image.Texture.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+	}
+	CmdBuffer->End();
+	GCmdBufferMgr.Submit(GDevice, CmdBuffer);
+	CmdBuffer->WaitForFence();
 }
 
 

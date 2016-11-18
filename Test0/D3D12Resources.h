@@ -171,7 +171,7 @@ struct FImage
 {
 	Microsoft::WRL::ComPtr<ID3D12Resource> Texture;
 
-	void Create(FDevice& InDevice, uint32 InWidth, uint32 InHeight, DXGI_FORMAT Format
+	void Create(FDevice& InDevice, uint32 InWidth, uint32 InHeight, DXGI_FORMAT InFormat
 #if ENABLE_VULKAN
 		, VkImageUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropertyFlags, FMemManager* MemMgr, uint32 InNumMips, VkSampleCountFlagBits InSamples
 #endif
@@ -180,9 +180,9 @@ struct FImage
 		//Device = InDevice;
 		Width = InWidth;
 		Height = InHeight;
+		Format = InFormat;
 #if ENABLE_VULKAN
 		NumMips = InNumMips;
-		Format = InFormat;
 		Samples = InSamples;
 #endif
 		D3D12_RESOURCE_DESC Desc;
@@ -264,9 +264,9 @@ struct FImage
 #endif
 	uint32 Width = 0;
 	uint32 Height = 0;
+	DXGI_FORMAT Format = DXGI_FORMAT_UNKNOWN;
 #if ENABLE_VULKAN
 	uint32 NumMips = 0;
-	VkFormat Format = VK_FORMAT_UNDEFINED;
 	VkSampleCountFlagBits Samples = VK_SAMPLE_COUNT_1_BIT;
 	VkMemoryRequirements Reqs;
 	FMemSubAlloc* SubAlloc = nullptr;
@@ -290,7 +290,6 @@ struct FImageView
 	}
 };
 
-#if ENABLE_VULKAN
 struct FStagingBuffer : public FBuffer
 {
 	FCmdBuffer* CmdBuffer = nullptr;
@@ -299,23 +298,23 @@ struct FStagingBuffer : public FBuffer
 	void SetFence(FCmdBuffer* InCmdBuffer)
 	{
 		CmdBuffer = InCmdBuffer;
-		FenceCounter = InCmdBuffer->Fence->FenceSignaledCounter;
+		FenceCounter = InCmdBuffer->Fence.FenceSignaledCounter;
 	}
 
 	bool IsSignaled() const
 	{
-		return FenceCounter < CmdBuffer->Fence->FenceSignaledCounter;
+		return FenceCounter < CmdBuffer->Fence.FenceSignaledCounter;
 	}
 };
 
-
 struct FStagingManager
 {
-	VkDevice Device = VK_NULL_HANDLE;
 	FMemManager* MemMgr = nullptr;
-	void Create(VkDevice InDevice, FMemManager* InMemMgr)
+	void Create(FDevice& InDevice, FMemManager* InMemMgr)
 	{
+#if ENABLE_VULKAN
 		Device = InDevice;
+#endif
 		MemMgr = InMemMgr;
 	}
 
@@ -330,7 +329,7 @@ struct FStagingManager
 		}
 	}
 
-	FStagingBuffer* RequestUploadBuffer(uint32 Size)
+	FStagingBuffer* RequestUploadBuffer(FDevice& InDevice, uint32 Size)
 	{
 /*
 		for (auto& Entry : Entries)
@@ -345,7 +344,7 @@ struct FStagingManager
 		}
 */
 		auto* Buffer = new FStagingBuffer;
-		Buffer->Create(Device, Size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, MemMgr);
+		Buffer->Create(InDevice, Size);//, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, MemMgr);
 		FEntry Entry;
 		Entry.Buffer = Buffer;
 		Entry.bFree = false;
@@ -353,10 +352,10 @@ struct FStagingManager
 		return Buffer;
 	}
 
-	FStagingBuffer* RequestUploadBufferForImage(const FImage* Image)
+	FStagingBuffer* RequestUploadBufferForImage(FDevice& InDevice, const FImage* Image)
 	{
 		uint32 Size = Image->Width * Image->Height * GetFormatBitsPerPixel(Image->Format) / 8;
-		return RequestUploadBuffer(Size);
+		return RequestUploadBuffer(InDevice, Size);
 	}
 
 	void Update()
@@ -381,6 +380,7 @@ struct FStagingManager
 	std::vector<FEntry> Entries;
 };
 
+#if ENABLE_VULKAN
 inline bool IsDepthOrStencilFormat(VkFormat Format)
 {
 	switch (Format)
@@ -1350,14 +1350,17 @@ inline void MapAndFillBufferSync(FStagingBuffer* StagingBuffer, FCmdBuffer* CmdB
 	CopyBuffer(CmdBuffer, StagingBuffer, DestBuffer);
 	StagingBuffer->SetFence(CmdBuffer);
 }
+#endif
 
 template <typename TFillLambda>
 inline void MapAndFillImageSync(FStagingBuffer* StagingBuffer, FCmdBuffer* CmdBuffer, FImage* DestImage, TFillLambda Fill)
 {
-	void* Data = StagingBuffer->GetMappedData();
+	void* Data = StagingBuffer->Map();
 	check(Data);
 	Fill(Data, DestImage->Width, DestImage->Height);
-
+	StagingBuffer->Unmap();
+	CmdBuffer->CommandList->CopyResource(DestImage->Texture.Get(), StagingBuffer->Buffer.Get());
+#if ENABLE_VULKAN
 	{
 		VkBufferImageCopy Region;
 		MemZero(Region);
@@ -1371,10 +1374,11 @@ inline void MapAndFillImageSync(FStagingBuffer* StagingBuffer, FCmdBuffer* CmdBu
 		Region.imageExtent.depth = 1;
 		vkCmdCopyBufferToImage(CmdBuffer->CmdBuffer, StagingBuffer->Buffer, DestImage->Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
 	}
-
+#endif
 	StagingBuffer->SetFence(CmdBuffer);
 }
 
+#if ENABLE_VULKAN
 inline void CopyColorImage(FCmdBuffer* CmdBuffer, uint32 Width, uint32 Height, VkImage SrcImage, VkImageLayout SrcCurrentLayout, VkImage DstImage, VkImageLayout DstCurrentLayout)
 {
 	check(CmdBuffer->State == FCmdBuffer::EState::Begun);
