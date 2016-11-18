@@ -153,14 +153,20 @@ struct FUniformBuffer
 
 	FBuffer Buffer;
 };
+#endif
 
 struct FImage
 {
-	void Create(VkDevice InDevice, uint32 InWidth, uint32 InHeight, VkFormat InFormat, VkImageUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropertyFlags, FMemManager* MemMgr, uint32 InNumMips, VkSampleCountFlagBits InSamples)
+	void Create(FDevice& InDevice, uint32 InWidth, uint32 InHeight
+#if ENABLE_VULKAN
+		, VkFormat InFormat, VkImageUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropertyFlags, FMemManager* MemMgr, uint32 InNumMips, VkSampleCountFlagBits InSamples
+#endif
+	)
 	{
-		Device = InDevice;
+		//Device = InDevice;
 		Width = InWidth;
 		Height = InHeight;
+#if ENABLE_VULKAN
 		NumMips = InNumMips;
 		Format = InFormat;
 		Samples = InSamples;
@@ -186,8 +192,10 @@ struct FImage
 		SubAlloc = MemMgr->Alloc(Reqs, MemPropertyFlags, true);
 
 		vkBindImageMemory(Device, Image, SubAlloc->GetHandle(), SubAlloc->GetBindOffset());
+#endif
 	}
 
+#if ENABLE_VULKAN
 	void Destroy(VkDevice Device)
 	{
 		vkDestroyImage(Device, Image, nullptr);
@@ -208,15 +216,19 @@ struct FImage
 
 	VkDevice Device;
 	VkImage Image = VK_NULL_HANDLE;
+#endif
 	uint32 Width = 0;
 	uint32 Height = 0;
+#if ENABLE_VULKAN
 	uint32 NumMips = 0;
 	VkFormat Format = VK_FORMAT_UNDEFINED;
 	VkSampleCountFlagBits Samples = VK_SAMPLE_COUNT_1_BIT;
 	VkMemoryRequirements Reqs;
 	FMemSubAlloc* SubAlloc = nullptr;
+#endif
 };
 
+#if ENABLE_VULKAN
 struct FImageView
 {
 	VkImageView ImageView = VK_NULL_HANDLE;
@@ -380,22 +392,36 @@ inline VkImageAspectFlags GetImageAspectFlags(VkFormat Format)
 		return VK_IMAGE_ASPECT_COLOR_BIT;
 	}
 }
+#endif
 
 struct FImage2DWithView
 {
-	void Create(VkDevice InDevice, uint32 InWidth, uint32 InHeight, VkFormat Format, VkImageUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropertyFlags, FMemManager* MemMgr, uint32 InNumMips = 1, VkSampleCountFlagBits Samples = VK_SAMPLE_COUNT_1_BIT)
+	void Create(FDevice& InDevice, uint32 InWidth, uint32 InHeight
+#if ENABLE_VULKAN
+		, VkFormat Format, VkImageUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropertyFlags, FMemManager* MemMgr, uint32 InNumMips = 1, VkSampleCountFlagBits Samples = VK_SAMPLE_COUNT_1_BIT
+#endif
+	)
 	{
-		Image.Create(InDevice, InWidth, InHeight, Format, UsageFlags, MemPropertyFlags, MemMgr, InNumMips, Samples);
+		Image.Create(InDevice, InWidth, InHeight
+#if ENABLE_VULKAN
+			, Format, UsageFlags, MemPropertyFlags, MemMgr, InNumMips, Samples
+#endif
+		);
+#if ENABLE_VULKAN
 		ImageView.Create(InDevice, Image.Image, VK_IMAGE_VIEW_TYPE_2D, Format, GetImageAspectFlags(Format));
+#endif
 	}
 
+#if ENABLE_VULKAN
 	void Destroy()
 	{
 		ImageView.Destroy();
 		Image.Destroy(ImageView.Device);
 	}
+#endif
 
 	FImage Image;
+#if ENABLE_VULKAN
 	FImageView ImageView;
 
 	inline VkFormat GetFormat() const
@@ -412,6 +438,7 @@ struct FImage2DWithView
 	{
 		return ImageView.ImageView;
 	}
+#endif
 
 	inline uint32 GetWidth() const
 	{
@@ -424,6 +451,7 @@ struct FImage2DWithView
 	}
 };
 
+#if ENABLE_VULKAN
 struct FSampler
 {
 	VkSampler Sampler = VK_NULL_HANDLE;
@@ -507,11 +535,12 @@ struct FShader
 
 struct FPSO
 {
-#if ENABLE_VULKAN
-	virtual void SetupLayoutBindings(std::vector<VkDescriptorSetLayoutBinding>& OutBindings)
+	Microsoft::WRL::ComPtr<ID3D12RootSignature> RootSignature;
+
+	virtual void SetupLayoutBindings(std::vector<D3D12_ROOT_PARAMETER>& OutRootParameters)
 	{
 	}
-#endif
+
 	virtual void Destroy()
 	{
 #if ENABLE_VULKAN
@@ -522,22 +551,24 @@ struct FPSO
 #endif
 	}
 
-#if ENABLE_VULKAN
-	void CreateDescriptorSetLayout(VkDevice Device)
+	void CreateDescriptorSetLayout(FDevice& Device)
 	{
-		std::vector<VkDescriptorSetLayoutBinding> DSBindings;
-		SetupLayoutBindings(DSBindings);
+		std::vector<D3D12_ROOT_PARAMETER> RootParameters;
+		SetupLayoutBindings(RootParameters);
 
-		VkDescriptorSetLayoutCreateInfo Info;
-		MemZero(Info);
-		Info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-		Info.bindingCount = (uint32)DSBindings.size();
-		Info.pBindings = DSBindings.empty() ? nullptr : &DSBindings[0];
-		checkVk(vkCreateDescriptorSetLayout(Device, &Info, nullptr, &DSLayout));
+		D3D12_ROOT_SIGNATURE_DESC Desc;
+		MemZero(Desc);
+		Desc.NumParameters = (uint32)RootParameters.size();
+		Desc.pParameters = RootParameters.empty() ? nullptr : &RootParameters[0];
+		Desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+
+		Microsoft::WRL::ComPtr<ID3DBlob> Signature;
+		Microsoft::WRL::ComPtr<ID3DBlob> Error;
+		checkD3D12(D3D12SerializeRootSignature(&Desc, D3D_ROOT_SIGNATURE_VERSION_1, &Signature, &Error));
+		checkD3D12(Device.Device->CreateRootSignature(0, Signature->GetBufferPointer(), Signature->GetBufferSize(), IID_PPV_ARGS(&RootSignature)));
 	}
 
-	VkDescriptorSetLayout DSLayout = VK_NULL_HANDLE;
-
+#if ENABLE_VULKAN
 	virtual void SetupShaderStages(std::vector<VkPipelineShaderStageCreateInfo>& OutShaderStages)
 	{
 	}
@@ -548,6 +579,7 @@ struct FGfxPSO : public FPSO
 {
 	FShader VS;
 	FShader PS;
+
 	virtual void Destroy() override
 	{
 		FPSO::Destroy();
@@ -567,9 +599,7 @@ struct FGfxPSO : public FPSO
 			return false;
 		}
 
-#if ENABLE_VULKAN
 		CreateDescriptorSetLayout(Device);
-#endif
 		return true;
 	}
 
@@ -648,33 +678,49 @@ struct FVertexFormat
 #endif
 };
 
-#if ENABLE_VULKAN
 class FGfxPSOLayout
 {
 public:
-	FGfxPSOLayout(FGfxPSO* InGfxPSO, FVertexFormat* InVF, uint32 InWidth, uint32 InHeight, VkRenderPass InRenderPass, bool bInWireframe)
+	FGfxPSOLayout(FGfxPSO* InGfxPSO, FVertexFormat* InVF, 
+#if ENABLE_VULKAN
+		uint32 InWidth, uint32 InHeight, VkRenderPass InRenderPass, 
+#endif
+		bool bInWireframe)
 		: GfxPSO(InGfxPSO)
 		, VF(InVF)
+#if ENABLE_VULKAN
 		, Width(InWidth)
 		, Height(InHeight)
 		, RenderPass(InRenderPass)
+#endif
 		, bWireframe(bInWireframe)
 	{
 	}
 
 	friend inline bool operator < (const FGfxPSOLayout& A, const FGfxPSOLayout& B)
 	{
-		return A.Width < B.Width || A.Height < B.Height || A.GfxPSO < B.GfxPSO || A.VF < B.VF || A.RenderPass < B.RenderPass || A.bWireframe < B.bWireframe;
+		return 
+#if ENABLE_VULKAN
+			A.Width < B.Width || A.Height < B.Height || 
+#endif
+			A.GfxPSO < B.GfxPSO || A.VF < B.VF || 
+#if ENABLE_VULKAN
+			A.RenderPass < B.RenderPass || 
+#endif
+			A.bWireframe < B.bWireframe;
 	}
 protected:
 	FGfxPSO* GfxPSO;
 	FVertexFormat* VF;
+#if ENABLE_VULKAN
 	uint32 Width;
 	uint32 Height;
 	VkRenderPass RenderPass;
+#endif
 	bool bWireframe;
 };
 
+#if ENABLE_VULKAN
 struct FComputePSO : public FPSO
 {
 	FShader CS;
@@ -718,12 +764,11 @@ struct FComputePSO : public FPSO
 		OutShaderStages.push_back(Info);
 	}
 };
-
+#endif
 struct FBasePipeline
 {
-	VkPipeline Pipeline = VK_NULL_HANDLE;
-	VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
-
+	Microsoft::WRL::ComPtr<ID3D12PipelineState> PipelineState;
+#if ENABLE_VULKAN
 	void Destroy(VkDevice Device)
 	{
 		vkDestroyPipeline(Device, Pipeline, nullptr);
@@ -732,8 +777,9 @@ struct FBasePipeline
 		vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
 		PipelineLayout = VK_NULL_HANDLE;
 	}
-};
 #endif
+};
+
 struct FDescriptorPool
 {
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> RTVHeap;
@@ -924,26 +970,21 @@ struct FRenderPass
 protected:
 	FRenderPassLayout Layout;
 };
+#endif
 
 struct FGfxPipeline : public FBasePipeline
 {
-	VkPipelineInputAssemblyStateCreateInfo IAInfo;
-	VkViewport Viewport;
-	VkRect2D Scissor;
-	VkPipelineViewportStateCreateInfo ViewportInfo;
-	VkPipelineRasterizationStateCreateInfo RSInfo;
-	VkPipelineMultisampleStateCreateInfo MSInfo;
-	VkStencilOpState Stencil;
-	VkPipelineDepthStencilStateCreateInfo DSInfo;
-	VkPipelineColorBlendAttachmentState AttachState;
-	VkPipelineColorBlendStateCreateInfo CBInfo;
-	VkDynamicState Dynamic[2];
-	VkPipelineDynamicStateCreateInfo DynamicInfo;
-
 	FGfxPipeline();
-	void Create(VkDevice Device, FGfxPSO* PSO, FVertexFormat* VertexFormat, uint32 Width, uint32 Height, FRenderPass* RenderPass);	
+	void Create(FDevice* Device, FGfxPSO* PSO, FVertexFormat* VertexFormat
+#if ENABLE_VULKAN
+		, uint32 Width, uint32 Height, FRenderPass* RenderPass
+#endif
+	);
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC Desc = {};
 };
 
+#if ENABLE_VULKAN
 struct FComputePipeline : public FBasePipeline
 {
 	void Create(VkDevice Device, FComputePSO* PSO)

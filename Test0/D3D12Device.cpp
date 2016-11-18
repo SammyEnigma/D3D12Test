@@ -209,9 +209,11 @@ void FRenderPass::Create(VkDevice InDevice, const FRenderPassLayout& InLayout)
 
 	checkVk(vkCreateRenderPass(Device, &RenderPassInfo, nullptr, &RenderPass));
 }
+#endif
 
 FGfxPipeline::FGfxPipeline()
 {
+#if ENABLE_VULKAN
 	MemZero(IAInfo);
 	IAInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
 	IAInfo.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -235,18 +237,19 @@ FGfxPipeline::FGfxPipeline()
 	ViewportInfo.pViewports = &Viewport;
 	ViewportInfo.scissorCount = 1;
 	ViewportInfo.pScissors = &Scissor;
-
-	MemZero(RSInfo);
-	RSInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-	//RSInfo.depthClampEnable = VK_FALSE;
-	//RSInfo.rasterizerDiscardEnable = VK_FALSE;
-	RSInfo.polygonMode = VK_POLYGON_MODE_FILL;
-	RSInfo.cullMode = VK_CULL_MODE_BACK_BIT;
-	RSInfo.frontFace = VK_FRONT_FACE_CLOCKWISE;
-	//RSInfo.depthBiasEnable = VK_FALSE;
-	//RSInfo.depthBiasConstantFactor = 0;
-	//RSInfo.depthBiasClamp = 0;
-	//RSInfo.depthBiasSlopeFactor = 0;
+#endif
+	Desc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+	Desc.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
+	Desc.RasterizerState.FrontCounterClockwise = FALSE;
+	Desc.RasterizerState.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
+	Desc.RasterizerState.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
+	Desc.RasterizerState.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
+	Desc.RasterizerState.DepthClipEnable = TRUE;
+	Desc.RasterizerState.MultisampleEnable = FALSE;
+	Desc.RasterizerState.AntialiasedLineEnable = FALSE;
+	Desc.RasterizerState.ForcedSampleCount = 0;
+	Desc.RasterizerState.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
+#if ENABLE_VULKAN
 	RSInfo.lineWidth = 1;
 
 	MemZero(MSInfo);
@@ -280,17 +283,23 @@ FGfxPipeline::FGfxPipeline()
 	//DSInfo.back.passOp = VK_STENCIL_OP_DECREMENT_AND_WRAP;
 	//DSInfo.minDepthBounds = 0;
 	//DSInfo.maxDepthBounds = 0;
+#endif
 
-	MemZero(AttachState);
-	//AtachState.blendEnable = VK_FALSE;
-	AttachState.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_COLOR;
-	AttachState.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;
-	AttachState.colorBlendOp = VK_BLEND_OP_ADD;
-	AttachState.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-	AttachState.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-	AttachState.alphaBlendOp = VK_BLEND_OP_ADD;
-	AttachState.colorWriteMask = 0xf;
-
+	Desc.BlendState.AlphaToCoverageEnable = FALSE;
+	Desc.BlendState.IndependentBlendEnable = FALSE;
+	const D3D12_RENDER_TARGET_BLEND_DESC DefaultRenderTargetBlendDesc =
+	{
+		FALSE,FALSE,
+		D3D12_BLEND_ONE, D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD,
+		D3D12_BLEND_ONE, D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD,
+		D3D12_LOGIC_OP_NOOP,
+		D3D12_COLOR_WRITE_ENABLE_ALL,
+	};
+	for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i)
+	{
+		Desc.BlendState.RenderTarget[i] = DefaultRenderTargetBlendDesc;
+	}
+#if ENABLE_VULKAN
 	MemZero(CBInfo);
 	CBInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
 	//CBInfo.logicOpEnable = VK_FALSE;
@@ -309,10 +318,16 @@ FGfxPipeline::FGfxPipeline()
 	DynamicInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
 	DynamicInfo.dynamicStateCount = 2;
 	DynamicInfo.pDynamicStates = Dynamic;
+#endif
 }
 
-void FGfxPipeline::Create(VkDevice Device, FGfxPSO* PSO, FVertexFormat* VertexFormat, uint32 Width, uint32 Height, FRenderPass* RenderPass)
+void FGfxPipeline::Create(FDevice* Device, FGfxPSO* PSO, FVertexFormat* VertexFormat
+#if ENABLE_VULKAN
+	, uint32 Width, uint32 Height, FRenderPass* RenderPass
+#endif
+)
 {
+#if ENABLE_VULKAN
 	std::vector<VkPipelineShaderStageCreateInfo> ShaderStages;
 	PSO->SetupShaderStages(ShaderStages);
 
@@ -358,8 +373,26 @@ void FGfxPipeline::Create(VkDevice Device, FGfxPSO* PSO, FVertexFormat* VertexFo
 	//PipelineInfo.basePipelineIndex = 0;
 
 	checkVk(vkCreateGraphicsPipelines(Device, VK_NULL_HANDLE, 1, &PipelineInfo, nullptr, &Pipeline));
+#endif
+	//Desc.InputLayout ={inputElementDescs, _countof(inputElementDescs)};
+	Desc.pRootSignature = PSO->RootSignature.Get();
+
+	Desc.VS.pShaderBytecode = PSO->VS.UCode->GetBufferPointer();
+	Desc.VS.BytecodeLength = PSO->VS.UCode->GetBufferSize();
+	Desc.PS.pShaderBytecode = PSO->PS.UCode->GetBufferPointer();
+	Desc.PS.BytecodeLength = PSO->PS.UCode->GetBufferSize();
+
+	Desc.DepthStencilState.DepthEnable = FALSE;
+	Desc.DepthStencilState.StencilEnable = FALSE;
+	Desc.SampleMask = UINT_MAX;
+	Desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	Desc.NumRenderTargets = 1;
+	Desc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+	Desc.SampleDesc.Count = 1;
+	checkD3D12(Device->Device->CreateGraphicsPipelineState(&Desc, IID_PPV_ARGS(&PipelineState)));
 }
 
+#if ENABLE_VULKAN
 FMemPage::FMemPage(VkDevice InDevice, VkDeviceSize Size, uint32 InMemTypeIndex, bool bInMapped)
 	: Allocation(InDevice, Size, MemTypeIndex, bInMapped)
 	, MemTypeIndex(InMemTypeIndex)

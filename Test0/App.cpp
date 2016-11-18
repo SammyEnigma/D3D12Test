@@ -71,16 +71,17 @@ static FUniformBuffer<FObjUB> GIdentityUB;
 static FImage2DWithView GCheckerboardTexture;
 static FImage2DWithView GHeightMap;
 static FSampler GSampler;
-
+#endif
 
 struct FRenderTargetPool
 {
 	struct FEntry
 	{
 		bool bFree = true;
-		VkImageLayout Layout = VK_IMAGE_LAYOUT_UNDEFINED;
 		FImage2DWithView Texture;
 		const char* Name = nullptr;
+#if ENABLE_VULKAN
+		VkImageLayout Layout = VK_IMAGE_LAYOUT_UNDEFINED;
 		VkImageUsageFlags Usage = 0;
 		VkMemoryPropertyFlags MemProperties = 0;
 
@@ -137,27 +138,32 @@ struct FRenderTargetPool
 			ImageBarrier(CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, Texture.GetImage(), Layout, GetAccessMask(Layout), NewLayout, GetAccessMask(NewLayout), Aspect);
 			Layout = NewLayout;
 		}
+#endif
 	};
 
+#if ENABLE_VULKAN
 	VkDevice Device = VK_NULL_HANDLE;
 	FMemManager* MemMgr = nullptr;
-
-	void Create(VkDevice InDevice, FMemManager* InMemMgr)
+#endif
+	void Create(/*VkDevice InDevice, FMemManager* InMemMgr*/)
 	{
+#if ENABLE_VULKAN
 		Device = InDevice;
 		MemMgr = InMemMgr;
-
+#endif
 		InitializeCriticalSection(&CS);
 	}
 
 	void Destroy()
 	{
+#if ENABLE_VULKAN
 		for (auto* Entry : Entries)
 		{
 			check(Entry->bFree);
 			Entry->Texture.Destroy();
 			delete Entry;
 		}
+#endif
 	}
 
 	void EmptyPool()
@@ -172,7 +178,7 @@ struct FRenderTargetPool
 		}
 	}
 
-	FEntry* Acquire(const char* InName, uint32 Width, uint32 Height, VkFormat Format, VkImageUsageFlags Usage, VkMemoryPropertyFlagBits MemProperties, uint32 NumMips, VkSampleCountFlagBits Samples)
+	FEntry* Acquire(FDevice* Device, const char* InName, uint32 Width, uint32 Height)//, VkFormat Format, VkImageUsageFlags Usage, VkMemoryPropertyFlagBits MemProperties, uint32 NumMips, VkSampleCountFlagBits Samples)
 	{
 		::EnterCriticalSection(&CS);
 		for (auto* Entry : Entries)
@@ -181,12 +187,15 @@ struct FRenderTargetPool
 			{
 				FImage& Image = Entry->Texture.Image;
 				if (Image.Width == Width && 
-					Image.Height == Height &&
+					Image.Height == Height 
+#if ENABLE_VULKAN
+					&&
 					Image.Format == Format &&
 					Image.NumMips == NumMips &&
 					Image.Samples == Samples &&
 					Entry->Usage == Usage &&
 					Entry->MemProperties == MemProperties
+#endif
 					)
 				{
 					Entry->bFree = false;
@@ -202,11 +211,17 @@ struct FRenderTargetPool
 		::LeaveCriticalSection(&CS);
 
 		Entry->bFree = false;
+#if ENABLE_VULKAN
 		Entry->Usage = Usage;
 		Entry->MemProperties = MemProperties;
 		Entry->Name = InName;
+#endif
 
-		Entry->Texture.Create(Device, Width, Height, Format, Usage, MemProperties, MemMgr, NumMips, Samples);
+		Entry->Texture.Create(*Device, Width, Height
+#if ENABLE_VULKAN
+			, Format, Usage, MemProperties, MemMgr, NumMips, Samples
+#endif
+		);
 
 		return Entry;
 	}
@@ -226,7 +241,7 @@ struct FRenderTargetPool
 };
 static FRenderTargetPool GRenderTargetPool;
 
-
+#if ENABLE_VULKAN
 #if TRY_MULTITHREADED > 0
 struct FThread
 {
@@ -270,14 +285,14 @@ bool GQuitting = false;
 
 struct FTestPSO : public FGfxPSO
 {
-#if ENABLE_VULKAN
-	virtual void SetupLayoutBindings(std::vector<VkDescriptorSetLayoutBinding>& OutBindings) override
+	virtual void SetupLayoutBindings(std::vector<D3D12_ROOT_PARAMETER>& OutRootParameters) override
 	{
+#if ENABLE_VULKAN
 		AddBinding(OutBindings, VK_SHADER_STAGE_VERTEX_BIT, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 		AddBinding(OutBindings, VK_SHADER_STAGE_VERTEX_BIT, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 		AddBinding(OutBindings, VK_SHADER_STAGE_FRAGMENT_BIT, 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-	}
 #endif
+}
 };
 FTestPSO GTestPSO;
 
@@ -357,16 +372,17 @@ Found:
 	OutDevice.Create();
 }
 
-#if ENABLE_VULKAN
-
 struct FObjectCache
 {
 	FDevice* Device = nullptr;
 
+#if ENABLE_VULKAN
 	std::map<uint64, FRenderPass*> RenderPasses;
 	std::map<FComputePSO*, FComputePipeline*> ComputePipelines;
+#endif
 	std::map<FGfxPSOLayout, FGfxPipeline*> GfxPipelines;
 
+#if ENABLE_VULKAN
 	struct FFrameBufferEntry
 	{
 		FFramebuffer* Framebuffer;
@@ -394,12 +410,12 @@ struct FObjectCache
 		VkImageView ResolveColor;
 	};
 	std::vector<FFrameBufferEntry> Framebuffers;
-
+#endif
 	void Create(FDevice* InDevice)
 	{
 		Device = InDevice;
 	}
-
+#if ENABLE_VULKAN
 	FFramebuffer* GetOrCreateFramebuffer(VkRenderPass RenderPass, VkImageView Color, VkImageView DepthStencil, uint32 Width, uint32 Height, VkImageView ResolveColor = VK_NULL_HANDLE)
 	{
 		for (auto& Entry : Framebuffers)
@@ -418,10 +434,11 @@ struct FObjectCache
 		Framebuffers.push_back(Entry);
 		return NewFramebuffer;
 	}
+#endif
 
-	FGfxPipeline* GetOrCreateGfxPipeline(FGfxPSO* GfxPSO, FVertexFormat* VF, uint32 Width, uint32 Height, FRenderPass* RenderPass, bool bWireframe = false)
+	FGfxPipeline* GetOrCreateGfxPipeline(FGfxPSO* GfxPSO, FVertexFormat* VF, /*uint32 Width, uint32 Height, FRenderPass* RenderPass, */bool bWireframe = false)
 	{
-		FGfxPSOLayout Layout(GfxPSO, VF, Width, Height, RenderPass->RenderPass, bWireframe);
+		FGfxPSOLayout Layout(GfxPSO, VF, /*Width, Height, RenderPass->RenderPass, */bWireframe);
 		auto Found = GfxPipelines.find(Layout);
 		if (Found != GfxPipelines.end())
 		{
@@ -429,12 +446,15 @@ struct FObjectCache
 		}
 
 		auto* NewPipeline = new FGfxPipeline;
+#if ENABLE_VULKAN
 		NewPipeline->RSInfo.polygonMode = bWireframe ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
-		NewPipeline->Create(Device->Device, GfxPSO, VF, Width, Height, RenderPass);
+#endif
+		NewPipeline->Create(Device, GfxPSO, VF/*, Width, Height, RenderPass*/);
 		GfxPipelines[Layout] = NewPipeline;
 		return NewPipeline;
 	}
 
+#if ENABLE_VULKAN
 	FComputePipeline* GetOrCreateComputePipeline(FComputePSO* ComputePSO)
 	{
 		auto Found = ComputePipelines.find(ComputePSO);
@@ -464,9 +484,10 @@ struct FObjectCache
 		RenderPasses[LayoutHash] = NewRenderPass;
 		return NewRenderPass;
 	}
-
+#endif
 	void Destroy()
 	{
+#if ENABLE_VULKAN
 		for (auto& Pair : RenderPasses)
 		{
 			Pair.second->Destroy();
@@ -494,10 +515,10 @@ struct FObjectCache
 			delete Entry.Framebuffer;
 		}
 		Framebuffers.swap(decltype(Framebuffers)());
+#endif
 	}
 };
 FObjectCache GObjectCache;
-#endif
 
 
 template <typename TFillLambda>
@@ -796,9 +817,8 @@ bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 	GSwapchain.Create(GInstance.DXGIFactory.Get(), hWnd, GDevice, Width, Height, GDescriptorPool);
 #if ENABLE_VULKAN
 	GStagingManager.Create(GDevice.Device, &GMemMgr);
-
-	GObjectCache.Create(&GDevice);
 #endif
+	GObjectCache.Create(&GDevice);
 	if (!LoadShadersAndGeometry())
 	{
 		return false;
@@ -817,9 +837,10 @@ bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 		FObjUB& ObjUB = *GIdentityUB.GetMappedData();
 		ObjUB.Obj = FMatrix4x4::GetIdentity();
 	}
+#endif
+	GRenderTargetPool.Create();//GDevice.Device, &GMemMgr);
 
-	GRenderTargetPool.Create(GDevice.Device, &GMemMgr);
-
+#if ENABLE_VULKAN
 	CreateAndFillTexture();
 
 	GSampler.Create(GDevice.Device);
@@ -913,10 +934,24 @@ static void UpdateCamera()
 #endif
 }
 
-static void InternalRenderFrame(FDevice* Device, /*FRenderPass* RenderPass, */FCmdBuffer* CmdBuffer/*, uint32 Width, uint32 Height* /*/)
+static void InternalRenderFrame(FDevice* Device, /*FRenderPass* RenderPass, */FCmdBuffer* CmdBuffer, uint32 Width, uint32 Height)
 {
+	auto* GfxPipeline = GObjectCache.GetOrCreateGfxPipeline(&GTestPSO, &GPosColorUVFormat, /*Width, Height, RenderPass, */GControl.ViewMode == EViewMode::Wireframe);
+
+	CmdBuffer->CommandList->SetPipelineState(GfxPipeline->PipelineState.Get());
+	CmdBuffer->CommandList->SetGraphicsRootSignature(GfxPipeline->Desc.pRootSignature);
+	D3D12_VIEWPORT Viewport;
+	MemZero(Viewport);
+	Viewport.Width = (float)Width;
+	Viewport.Height = (float)Height;
+	CmdBuffer->CommandList->RSSetViewports(1, &Viewport);
+	D3D12_RECT Scissor;
+	MemZero(Scissor);
+	Scissor.right = Width;
+	Scissor.bottom = Height;
+	CmdBuffer->CommandList->RSSetScissorRects(1, &Scissor);
+
 #if ENABLE_VULKAN
-	auto* GfxPipeline = GObjectCache.GetOrCreateGfxPipeline(&GTestPSO, &GPosColorUVFormat, Width, Height, RenderPass, GControl.ViewMode == EViewMode::Wireframe);
 	vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, GfxPipeline->Pipeline);
 
 	SetDynamicStates(CmdBuffer->CmdBuffer, Width, Height);
@@ -926,7 +961,7 @@ static void InternalRenderFrame(FDevice* Device, /*FRenderPass* RenderPass, */FC
 	DrawCube(/*GfxPipeline, */Device, CmdBuffer);
 }
 
-static void RenderFrame(FDevice* Device, FCmdBuffer* CmdBuffer/*, FImage2DWithView* ColorBuffer, FImage2DWithView* DepthBuffer, FImage2DWithView* ResolveColorBuffer*/)
+static void RenderFrame(FDevice* Device, FCmdBuffer* CmdBuffer, FImage2DWithView* ColorBuffer/*, FImage2DWithView* DepthBuffer, FImage2DWithView* ResolveColorBuffer*/)
 {
 	UpdateCamera();
 #if ENABLE_VULKAN
@@ -952,7 +987,7 @@ static void RenderFrame(FDevice* Device, FCmdBuffer* CmdBuffer/*, FImage2DWithVi
 		CmdBuffer->ExecuteSecondary();
 	}
 #else
-	InternalRenderFrame(Device, /*RenderPass, */CmdBuffer/*, ColorBuffer->GetWidth(), ColorBuffer->GetHeight()*/);
+	InternalRenderFrame(Device, /*RenderPass, */CmdBuffer, ColorBuffer->GetWidth(), ColorBuffer->GetHeight());
 #endif
 
 #if ENABLE_VULKAN
@@ -1046,9 +1081,12 @@ void DoRender()
 		CmdBuffer->CommandList->ClearRenderTargetView(GSwapchain.GetAcquiredImageView(), ClearColor, 0, nullptr);
 	}
 
+	auto* SceneColor = GRenderTargetPool.Acquire(&GDevice, GControl.DoMSAA ? "SceneColorMSAA" : "SceneColor", GSwapchain.GetWidth(), GSwapchain.GetHeight()
 #if ENABLE_VULKAN
-	auto* SceneColor = GRenderTargetPool.Acquire(GControl.DoMSAA ? "SceneColorMSAA" : "SceneColor", GSwapchain.GetWidth(), GSwapchain.GetHeight(), VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 1, GControl.DoMSAA ? VK_SAMPLE_COUNT_4_BIT : VK_SAMPLE_COUNT_1_BIT);
-
+		, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 1, GControl.DoMSAA ? VK_SAMPLE_COUNT_4_BIT : VK_SAMPLE_COUNT_1_BIT
+#endif
+	);
+#if ENABLE_VULKAN
 	SceneColor->DoTransition(CmdBuffer, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
 	//TestCompute(CmdBuffer);
@@ -1087,7 +1125,7 @@ void DoRender()
 	else
 #endif
 	{
-		RenderFrame(&GDevice, CmdBuffer/*, &SceneColor->Texture, &DepthBuffer->Texture, nullptr*/);
+		RenderFrame(&GDevice, CmdBuffer, &SceneColor->Texture/*, &DepthBuffer->Texture, nullptr*/);
 	}
 
 #if ENABLE_VULKAN
@@ -1152,9 +1190,9 @@ void DoResize(uint32 Width, uint32 Height)
 void DoDeinit()
 {
 	GCmdBufferMgr.Destroy();
+	GRenderTargetPool.EmptyPool();
 #if ENABLE_VULKAN
 	checkVk(vkDeviceWaitIdle(GDevice.Device));
-	GRenderTargetPool.EmptyPool();
 #if TRY_MULTITHREADED
 	GThread.bDoQuit = true;
 	SetEvent(GThread.StartEvent);
@@ -1188,11 +1226,10 @@ void DoDeinit()
 	GSetupFloorPSO.Destroy(GDevice.Device);
 	GFillTexturePSO.Destroy(GDevice.Device);
 
-	GRenderTargetPool.Destroy();
-
 	GStagingManager.Destroy();
-	GObjectCache.Destroy();
 #endif
+	GRenderTargetPool.Destroy();
+	GObjectCache.Destroy();
 	GMemMgr.Destroy();
 	GSwapchain.Destroy();
 	GDevice.Destroy();
