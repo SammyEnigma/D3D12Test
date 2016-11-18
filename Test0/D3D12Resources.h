@@ -169,9 +169,11 @@ struct FUniformBuffer
 
 struct FImage
 {
-	void Create(FDevice& InDevice, uint32 InWidth, uint32 InHeight
+	Microsoft::WRL::ComPtr<ID3D12Resource> Texture;
+
+	void Create(FDevice& InDevice, uint32 InWidth, uint32 InHeight, DXGI_FORMAT Format
 #if ENABLE_VULKAN
-		, VkFormat InFormat, VkImageUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropertyFlags, FMemManager* MemMgr, uint32 InNumMips, VkSampleCountFlagBits InSamples
+		, VkImageUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropertyFlags, FMemManager* MemMgr, uint32 InNumMips, VkSampleCountFlagBits InSamples
 #endif
 	)
 	{
@@ -182,7 +184,36 @@ struct FImage
 		NumMips = InNumMips;
 		Format = InFormat;
 		Samples = InSamples;
+#endif
+		D3D12_RESOURCE_DESC Desc;
+		MemZero(Desc);
+		Desc.MipLevels = 1;
+		Desc.Format = Format;
+		Desc.Width = Width;
+		Desc.Height = Height;
+		Desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+		Desc.DepthOrArraySize = 1;
+		Desc.SampleDesc.Count = 1;
+		Desc.SampleDesc.Quality = 0;
+		Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
 
+		D3D12_HEAP_PROPERTIES Heap;
+		MemZero(Heap);
+		Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+		Heap.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+		Heap.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+		Heap.CreationNodeMask = 1;
+		Heap.VisibleNodeMask = 1;
+
+		checkD3D12(InDevice.Device->CreateCommittedResource(
+			&Heap,
+			D3D12_HEAP_FLAG_NONE,
+			&Desc,
+			D3D12_RESOURCE_STATE_COPY_DEST,
+			nullptr,
+			IID_PPV_ARGS(&Texture)));
+
+#if ENABLE_VULKAN
 		VkImageCreateInfo ImageInfo;
 		MemZero(ImageInfo);
 		ImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -207,15 +238,17 @@ struct FImage
 #endif
 	}
 
-#if ENABLE_VULKAN
-	void Destroy(VkDevice Device)
+	void Destroy()
 	{
+#if ENABLE_VULKAN
 		vkDestroyImage(Device, Image, nullptr);
 		Image = VK_NULL_HANDLE;
 
 		SubAlloc->Release();
+#endif
 	}
 
+#if ENABLE_VULKAN
 	void* GetMappedData()
 	{
 		return SubAlloc->GetMappedData();
@@ -240,41 +273,24 @@ struct FImage
 #endif
 };
 
-#if ENABLE_VULKAN
 struct FImageView
 {
-	VkImageView ImageView = VK_NULL_HANDLE;
-	VkDevice Device = VK_NULL_HANDLE;
-	VkFormat Format = VK_FORMAT_UNDEFINED;
+	D3D12_CPU_DESCRIPTOR_HANDLE CPUHandle = {0};
+	D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle ={0};
+	D3D12_SHADER_RESOURCE_VIEW_DESC Desc;
 
-	void Create(VkDevice InDevice, VkImage Image, VkImageViewType ViewType, VkFormat InFormat, VkImageAspectFlags ImageAspect)
-	{
-		Device = InDevice;
-		Format = InFormat;
-
-		VkImageViewCreateInfo Info;
-		MemZero(Info);
-		Info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-		Info.image = Image;
-		Info.viewType = ViewType;
-		Info.format = Format;
-		Info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-		Info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-		Info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-		Info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-		Info.subresourceRange.aspectMask = ImageAspect;
-		Info.subresourceRange.levelCount = 1;
-		Info.subresourceRange.layerCount = 1;
-		checkVk(vkCreateImageView(Device, &Info, nullptr, &ImageView));
-	}
+	void Create(FDevice& InDevice, FImage& Image, DXGI_FORMAT InFormat, FDescriptorPool& Pool);
 
 	void Destroy()
 	{
+#if ENABLE_VULKAN
 		vkDestroyImageView(Device, ImageView, nullptr);
 		ImageView = VK_NULL_HANDLE;
+#endif
 	}
 };
 
+#if ENABLE_VULKAN
 struct FStagingBuffer : public FBuffer
 {
 	FCmdBuffer* CmdBuffer = nullptr;
@@ -408,33 +424,30 @@ inline VkImageAspectFlags GetImageAspectFlags(VkFormat Format)
 
 struct FImage2DWithView
 {
-	void Create(FDevice& InDevice, uint32 InWidth, uint32 InHeight
+	void Create(FDevice& InDevice, uint32 InWidth, uint32 InHeight, DXGI_FORMAT Format, FDescriptorPool& Pool
 #if ENABLE_VULKAN
-		, VkFormat Format, VkImageUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropertyFlags, FMemManager* MemMgr, uint32 InNumMips = 1, VkSampleCountFlagBits Samples = VK_SAMPLE_COUNT_1_BIT
+		, VkImageUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropertyFlags, FMemManager* MemMgr, uint32 InNumMips = 1, VkSampleCountFlagBits Samples = VK_SAMPLE_COUNT_1_BIT
 #endif
 	)
 	{
-		Image.Create(InDevice, InWidth, InHeight
+		Image.Create(InDevice, InWidth, InHeight, Format
 #if ENABLE_VULKAN
-			, Format, UsageFlags, MemPropertyFlags, MemMgr, InNumMips, Samples
+			, UsageFlags, MemPropertyFlags, MemMgr, InNumMips, Samples
 #endif
 		);
-#if ENABLE_VULKAN
-		ImageView.Create(InDevice, Image.Image, VK_IMAGE_VIEW_TYPE_2D, Format, GetImageAspectFlags(Format));
-#endif
+
+		ImageView.Create(InDevice, Image, Format, Pool);
 	}
 
-#if ENABLE_VULKAN
 	void Destroy()
 	{
 		ImageView.Destroy();
-		Image.Destroy(ImageView.Device);
+		Image.Destroy();
 	}
-#endif
 
 	FImage Image;
-#if ENABLE_VULKAN
 	FImageView ImageView;
+#if ENABLE_VULKAN
 
 	inline VkFormat GetFormat() const
 	{
@@ -463,45 +476,44 @@ struct FImage2DWithView
 	}
 };
 
-#if ENABLE_VULKAN
 struct FSampler
 {
+	D3D12_STATIC_SAMPLER_DESC SamplerDesc;
+#if ENABLE_VULKAN
 	VkSampler Sampler = VK_NULL_HANDLE;
 	VkDevice Device = VK_NULL_HANDLE;
-
-	void Create(VkDevice InDevice)
+#endif
+	void Create(FDevice& InDevice)
 	{
-		Device = InDevice;
+		MemZero(SamplerDesc);
+		SamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+		SamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+		SamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+		SamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+		SamplerDesc.MipLODBias = 0;
+		SamplerDesc.MaxAnisotropy = 0;
+		SamplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+		SamplerDesc.BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
+		SamplerDesc.MinLOD = 0.0f;
+		SamplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
+		SamplerDesc.ShaderRegister = 0;
+		SamplerDesc.RegisterSpace = 0;
+		SamplerDesc.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+		SamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
 
-		VkSamplerCreateInfo Info;
-		MemZero(Info);
-		Info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-		//VkSamplerCreateFlags    flags;
-		Info.magFilter = VK_FILTER_LINEAR;
-		Info.minFilter = VK_FILTER_LINEAR;
-		Info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-		//VkSamplerAddressMode    addressModeU;
-		//VkSamplerAddressMode    addressModeV;
-		//VkSamplerAddressMode    addressModeW;
-		//float                   mipLodBias;
-		//VkBool32                anisotropyEnable;
-		//float                   maxAnisotropy;
-		//VkBool32                compareEnable;
-		//VkCompareOp             compareOp;
-		//float                   minLod;
-		//float                   maxLod;
-		//VkBorderColor           borderColor;
-		//VkBool32                unnormalizedCoordinates;
+#if ENABLE_VULKAN
 		checkVk(vkCreateSampler(Device, &Info, nullptr, &Sampler));
+#endif
 	}
 
 	void Destroy()
 	{
+#if ENABLE_VULKAN
 		vkDestroySampler(Device, Sampler, nullptr);
 		Sampler = VK_NULL_HANDLE;
+#endif
 	}
 };
-#endif
 
 struct FShader
 {

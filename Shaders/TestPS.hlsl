@@ -4,11 +4,12 @@ struct FVSOut
 	float2 UVs : TEXCOORD0;
 	float4 Color : COLOR;
 };
-/*
+
 Texture2D Texture;
+/*
 SamplerState Sampler;
 */
 float4 Main(FVSOut In) : SV_Target0
 {
-	return float4(In.UVs.xy, 0, 1);
+	return float4(In.UVs.xy, 0, 1) + Texture.Load(int3(In.UVs * 64, 0));
 }

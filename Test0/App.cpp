@@ -67,11 +67,11 @@ struct FObjUB
 static FUniformBuffer<FObjUB> GObjUB;
 static FUniformBuffer<FObjUB> GIdentityUB;
 
-#if ENABLE_VULKAN
 static FImage2DWithView GCheckerboardTexture;
+#if ENABLE_VULKAN
 static FImage2DWithView GHeightMap;
-static FSampler GSampler;
 #endif
+static FSampler GSampler;
 
 struct FRenderTargetPool
 {
@@ -178,7 +178,7 @@ struct FRenderTargetPool
 		}
 	}
 
-	FEntry* Acquire(FDevice* Device, const char* InName, uint32 Width, uint32 Height)//, VkFormat Format, VkImageUsageFlags Usage, VkMemoryPropertyFlagBits MemProperties, uint32 NumMips, VkSampleCountFlagBits Samples)
+	FEntry* Acquire(FDevice* Device, const char* InName, uint32 Width, uint32 Height, DXGI_FORMAT Format)//, VkImageUsageFlags Usage, VkMemoryPropertyFlagBits MemProperties, uint32 NumMips, VkSampleCountFlagBits Samples)
 	{
 		::EnterCriticalSection(&CS);
 		for (auto* Entry : Entries)
@@ -217,9 +217,9 @@ struct FRenderTargetPool
 		Entry->Name = InName;
 #endif
 
-		Entry->Texture.Create(*Device, Width, Height
+		Entry->Texture.Create(*Device, Width, Height, Format, GDescriptorPool
 #if ENABLE_VULKAN
-			, Format, Usage, MemProperties, MemMgr, NumMips, Samples
+			, Usage, MemProperties, MemMgr, NumMips, Samples
 #endif
 		);
 
@@ -289,15 +289,11 @@ struct FTestPSO : public FGfxPSO
 	{
 		AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_CBV);
 		AddRange(OutRanges, 1, D3D12_DESCRIPTOR_RANGE_TYPE_CBV);
+		AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_SRV);
 
 		AddRootParam(OutRootParameters, OutRanges, 0, D3D12_SHADER_VISIBILITY_VERTEX);
 		AddRootParam(OutRootParameters, OutRanges, 1, D3D12_SHADER_VISIBILITY_VERTEX);
-
-#if ENABLE_VULKAN
-		AddBinding(OutBindings, VK_SHADER_STAGE_VERTEX_BIT, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-		AddBinding(OutBindings, VK_SHADER_STAGE_VERTEX_BIT, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-		AddBinding(OutBindings, VK_SHADER_STAGE_FRAGMENT_BIT, 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-#endif
+		AddRootParam(OutRootParameters, OutRanges, 2, D3D12_SHADER_VISIBILITY_PIXEL);
 }
 };
 FTestPSO GTestPSO;
@@ -659,11 +655,11 @@ static bool LoadShadersAndGeometry()
 	return true;
 }
 
-#if ENABLE_VULKAN
 void CreateAndFillTexture()
 {
 	srand(0);
-	GCheckerboardTexture.Create(GDevice.Device, 64, 64, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &GMemMgr, 1);
+	GCheckerboardTexture.Create(GDevice, 64, 64, DXGI_FORMAT_R8G8B8A8_UNORM, GDescriptorPool);//, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &GMemMgr, 1);
+#if ENABLE_VULKAN
 	GHeightMap.Create(GDevice.Device, 64, 64, VK_FORMAT_R32_SFLOAT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &GMemMgr, 1);
 
 	FComputePipeline* Pipeline = GObjectCache.GetOrCreateComputePipeline(&GFillTexturePSO);
@@ -711,9 +707,11 @@ void CreateAndFillTexture()
 	CmdBuffer->End();
 	GCmdBufferMgr.Submit(CmdBuffer, GDevice.PresentQueue, nullptr, nullptr);
 	CmdBuffer->WaitForFence();
+#endif
 }
 
 
+#if ENABLE_VULKAN
 static void FillFloor(FCmdBuffer* CmdBuffer)
 {
 	BufferBarrier(CmdBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, &GFloorVB.Buffer, 0, VK_ACCESS_SHADER_WRITE_BIT);
@@ -843,10 +841,10 @@ bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 
 	GRenderTargetPool.Create();//GDevice.Device, &GMemMgr);
 
-#if ENABLE_VULKAN
 	CreateAndFillTexture();
 
-	GSampler.Create(GDevice.Device);
+	GSampler.Create(GDevice);
+#if ENABLE_VULKAN
 	SetupFloor();
 #endif
 
@@ -1070,9 +1068,9 @@ void DoRender()
 		CmdBuffer->CommandList->ClearRenderTargetView(GSwapchain.GetAcquiredImageView(), ClearColor, 0, nullptr);
 	}
 
-	auto* SceneColor = GRenderTargetPool.Acquire(&GDevice, GControl.DoMSAA ? "SceneColorMSAA" : "SceneColor", GSwapchain.GetWidth(), GSwapchain.GetHeight()
+	auto* SceneColor = GRenderTargetPool.Acquire(&GDevice, GControl.DoMSAA ? "SceneColorMSAA" : "SceneColor", GSwapchain.GetWidth(), GSwapchain.GetHeight(), DXGI_FORMAT_R8G8B8A8_UNORM
 #if ENABLE_VULKAN
-		, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 1, GControl.DoMSAA ? VK_SAMPLE_COUNT_4_BIT : VK_SAMPLE_COUNT_1_BIT
+		, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 1, GControl.DoMSAA ? VK_SAMPLE_COUNT_4_BIT : VK_SAMPLE_COUNT_1_BIT
 #endif
 	);
 #if ENABLE_VULKAN
@@ -1200,10 +1198,9 @@ void DoDeinit()
 	GObjUB.Destroy();
 	GObjVB.Destroy();
 	GIdentityUB.Destroy();
-#if ENABLE_VULKAN
 	GSampler.Destroy();
-
 	GCheckerboardTexture.Destroy();
+#if ENABLE_VULKAN
 	GHeightMap.Destroy();
 #endif
 	GDescriptorPool.Destroy();

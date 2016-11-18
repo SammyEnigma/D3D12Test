@@ -488,3 +488,33 @@ void FSwapchain::ClearAndTransitionToPresent(FDevice& Device, FCmdBuffer* CmdBuf
 	}
 }
 */
+
+void FImageView::Create(FDevice& InDevice, FImage& Image, DXGI_FORMAT InFormat, FDescriptorPool& Pool)
+{
+	MemZero(Desc);
+	Desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	Desc.Format = InFormat;
+	Desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+	Desc.Texture2D.MipLevels = 1;
+	CPUHandle = Pool.CPUAllocateCSU();
+	InDevice.Device->CreateShaderResourceView(Image.Texture.Get(), &Desc, CPUHandle);
+
+#if ENABLE_VULKAN
+	Format = InFormat;
+
+	VkImageViewCreateInfo Info;
+	MemZero(Info);
+	Info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	Info.image = Image;
+	Info.viewType = ViewType;
+	Info.format = Format;
+	Info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+	Info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+	Info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+	Info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+	Info.subresourceRange.aspectMask = ImageAspect;
+	Info.subresourceRange.levelCount = 1;
+	Info.subresourceRange.layerCount = 1;
+	checkVk(vkCreateImageView(Device, &Info, nullptr, &ImageView));
+#endif
+}
