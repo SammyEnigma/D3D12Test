@@ -120,6 +120,15 @@ struct FVector3
 		V.z = z * f;
 		return V;
 	}
+
+	FVector3 Mul3(const FVector3& I) const
+	{
+		FVector3 V;
+		V.x = x * I.x;
+		V.y = y * I.y;
+		V.z = z * I.z;
+		return V;
+	}
 };
 
 struct FVector4

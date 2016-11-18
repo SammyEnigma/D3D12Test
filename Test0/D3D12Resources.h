@@ -145,19 +145,7 @@ inline void CmdBind(FCmdBuffer* CmdBuffer, FVertexBuffer* VB)
 template <typename TStruct>
 struct FUniformBuffer
 {
-	void Create(FDevice& InDevice, FMemManager& MemMgr
-#if ENABLE_VULKAN
-		,
-		VkBufferUsageFlags InUsageFlags = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-		VkMemoryPropertyFlags MemPropertyFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-#endif
-	)
-	{
-#if ENABLE_VULKAN
-		VkBufferUsageFlags UsageFlags = InUsageFlags | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-#endif
-		Buffer.Create(InDevice, sizeof(TStruct));//, UsageFlags, MemPropertyFlags, MemMgr);
-	}
+	void Create(FDevice& InDevice, struct FDescriptorPool& Pool);
 
 	TStruct* Map()
 	{
@@ -174,6 +162,7 @@ struct FUniformBuffer
 		Buffer.Destroy();
 	}
 
+	D3D12_CONSTANT_BUFFER_VIEW_DESC View;
 	FBuffer Buffer;
 };
 
@@ -559,7 +548,7 @@ struct FPSO
 {
 	Microsoft::WRL::ComPtr<ID3D12RootSignature> RootSignature;
 
-	virtual void SetupLayoutBindings(std::vector<D3D12_ROOT_PARAMETER>& OutRootParameters)
+	virtual void SetupLayoutBindings(std::vector<D3D12_ROOT_PARAMETER>& OutRootParameters, std::vector<D3D12_DESCRIPTOR_RANGE>& OutRanges)
 	{
 	}
 
@@ -576,7 +565,8 @@ struct FPSO
 	void CreateDescriptorSetLayout(FDevice& Device)
 	{
 		std::vector<D3D12_ROOT_PARAMETER> RootParameters;
-		SetupLayoutBindings(RootParameters);
+		std::vector<D3D12_DESCRIPTOR_RANGE> Ranges;
+		SetupLayoutBindings(RootParameters, Ranges);
 
 		D3D12_ROOT_SIGNATURE_DESC Desc;
 		MemZero(Desc);
@@ -820,6 +810,10 @@ struct FDescriptorPool
 	D3D12_GPU_DESCRIPTOR_HANDLE RTVGPUStart = {0};
 	SIZE_T RTVDescriptorSize = 0;
 
+	D3D12_CPU_DESCRIPTOR_HANDLE CSUCPUStart ={0};
+	D3D12_GPU_DESCRIPTOR_HANDLE CSUGPUStart ={0};
+	SIZE_T CSUDescriptorSize = 0;
+
 	void Create(FDevice& InDevice)
 	{
 		D3D12_DESCRIPTOR_HEAP_DESC HeapDesc;
@@ -829,18 +823,24 @@ struct FDescriptorPool
 		{
 			HeapDesc.NumDescriptors = 4096;
 			HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+			HeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 			checkD3D12(InDevice.Device->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&RTVHeap)));
 		}
 
 		{
 			HeapDesc.NumDescriptors = 32768;
 			HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+			HeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 			checkD3D12(InDevice.Device->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&CSUHeap)));
 		}
 
 		RTVCPUStart = RTVHeap->GetCPUDescriptorHandleForHeapStart();
 		RTVGPUStart = RTVHeap->GetGPUDescriptorHandleForHeapStart();
 		RTVDescriptorSize = InDevice.Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+
+		CSUCPUStart = CSUHeap->GetCPUDescriptorHandleForHeapStart();
+		CSUGPUStart = CSUHeap->GetGPUDescriptorHandleForHeapStart();
+		CSUDescriptorSize = InDevice.Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
 #if ENABLE_VULKAN
 		AddPool(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 32768);
@@ -880,6 +880,19 @@ struct FDescriptorPool
 	{
 		D3D12_GPU_DESCRIPTOR_HANDLE NewHandle = RTVGPUStart;
 		RTVGPUStart.ptr += RTVDescriptorSize;
+		return NewHandle;
+	}
+	D3D12_CPU_DESCRIPTOR_HANDLE AllocateCPUCB()
+	{
+		D3D12_CPU_DESCRIPTOR_HANDLE NewHandle = CSUCPUStart;
+		CSUCPUStart.ptr += CSUDescriptorSize;
+		return NewHandle;
+	}
+
+	D3D12_GPU_DESCRIPTOR_HANDLE AllocateGPUCSU()
+	{
+		D3D12_GPU_DESCRIPTOR_HANDLE NewHandle = CSUGPUStart;
+		CSUGPUStart.ptr += RTVDescriptorSize;
 		return NewHandle;
 	}
 };
@@ -1390,4 +1403,20 @@ inline void CmdBind(FCmdBuffer* CmdBuffer, FGfxPipeline * GfxPipeline)
 {
 	CmdBuffer->CommandList->SetPipelineState(GfxPipeline->PipelineState.Get());
 	CmdBuffer->CommandList->SetGraphicsRootSignature(GfxPipeline->Desc.pRootSignature);
+}
+
+
+
+template <typename TStruct>
+inline void FUniformBuffer<TStruct>::Create(FDevice& InDevice, FDescriptorPool& Pool)
+{
+	uint32 Size = (sizeof(TStruct) + 255) & ~255;
+	Buffer.Create(InDevice, Size);//, UsageFlags, MemPropertyFlags, MemMgr);
+
+	MemZero(View);
+	View.BufferLocation = Buffer.Buffer->GetGPUVirtualAddress();
+	View.SizeInBytes = Size;
+
+	D3D12_CPU_DESCRIPTOR_HANDLE Handle = Pool.AllocateCPUCB();
+	InDevice.Device->CreateConstantBufferView(&View, Handle);
 }

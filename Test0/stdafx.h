@@ -20,3 +20,5 @@
 
 // TODO: reference additional headers your program requires here
 #define ENABLE_VULKAN	0
+
+#include <d3d12.h>

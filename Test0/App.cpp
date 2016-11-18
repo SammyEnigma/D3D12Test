@@ -27,7 +27,7 @@ FControl::FControl()
 FControl GRequestControl;
 FControl GControl;
 
-FVector4 GCameraPos = {0, 0, -10, 1};
+FVector4 GCameraPos = {0, 0, 2.5, 1};
 
 static FInstance GInstance;
 static FDevice GDevice;
@@ -285,8 +285,27 @@ bool GQuitting = false;
 
 struct FTestPSO : public FGfxPSO
 {
-	virtual void SetupLayoutBindings(std::vector<D3D12_ROOT_PARAMETER>& OutRootParameters) override
+	virtual void SetupLayoutBindings(std::vector<D3D12_ROOT_PARAMETER>& OutRootParameters, std::vector<D3D12_DESCRIPTOR_RANGE>& OutRanges) override
 	{
+		auto RangeIndex = OutRanges.size();
+		D3D12_DESCRIPTOR_RANGE Range;
+		MemZero(Range);
+		Range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+		Range.NumDescriptors = 1;
+		Range.BaseShaderRegister = 0;
+		Range.RegisterSpace = 0;
+		//Range.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC;
+		Range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+		OutRanges.push_back(Range);
+
+		D3D12_ROOT_PARAMETER RootParam;
+		MemZero(RootParam);
+		RootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+		RootParam.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+		RootParam.DescriptorTable.NumDescriptorRanges = 1;
+		RootParam.DescriptorTable.pDescriptorRanges = &OutRanges[RangeIndex];
+		OutRootParameters.push_back(RootParam);
+
 #if ENABLE_VULKAN
 		AddBinding(OutBindings, VK_SHADER_STAGE_VERTEX_BIT, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 		AddBinding(OutBindings, VK_SHADER_STAGE_VERTEX_BIT, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
@@ -818,7 +837,7 @@ bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 	{
 		return false;
 	}
-	GViewUB.Create(GDevice, GMemMgr);
+	GViewUB.Create(GDevice, GDescriptorPool);
 #if ENABLE_VULKAN
 	GObjUB.Create(GDevice.Device, &GMemMgr);
 	GIdentityUB.Create(GDevice.Device, &GMemMgr);
@@ -868,8 +887,12 @@ static void DrawCube(/*FGfxPipeline* GfxPipeline, */FDevice* Device, FCmdBuffer*
 	vkUpdateDescriptorSets(Device, (uint32)WriteDescriptors.DSWrites.size(), &WriteDescriptors.DSWrites[0], 0, nullptr);
 
 	vkCmdBindDescriptorSets(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, GfxPipeline->PipelineLayout, 0, 1, &DescriptorSet, 0, nullptr);
-
 #endif
+	ID3D12DescriptorHeap* ppHeaps[] ={GDescriptorPool.CSUHeap.Get()};
+	CmdBuffer->CommandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
+	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(0, GDescriptorPool.CSUGPUStart);
+	CmdBuffer->CommandList->SetGraphicsRootSignature(GTestPSO.RootSignature.Get());
+
 	CmdBuffer->CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	CmdBind(CmdBuffer, &GObjVB);
 	CmdBuffer->CommandList->DrawInstanced((uint32)GObj.Faces.size() * 3, 1, 0, 0);
@@ -913,7 +936,7 @@ static void UpdateCamera()
 	FViewUB& ViewUB = *GViewUB.Map();
 	ViewUB.View = FMatrix4x4::GetIdentity();
 	//ViewUB.View.Values[3 * 4 + 2] = -10;
-	GCameraPos = GCameraPos.Add(GControl.StepDirection.Mul(0.01f));
+	GCameraPos = GCameraPos.Add(GControl.StepDirection.Mul3({0.01f, 0.01f, -0.01f}));
 	GRequestControl.StepDirection = {0, 0, 0};
 	GControl.StepDirection ={0, 0, 0};
 	ViewUB.View.Rows[3] = GCameraPos;
