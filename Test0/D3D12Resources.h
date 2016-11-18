@@ -163,7 +163,7 @@ struct FUniformBuffer
 	}
 
 	D3D12_CONSTANT_BUFFER_VIEW_DESC View;
-	D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle= {0};
+	D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle = {0};
 	FBuffer Buffer;
 };
 

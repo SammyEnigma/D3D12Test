@@ -517,4 +517,5 @@ void FImageView::Create(FDevice& InDevice, FImage& Image, DXGI_FORMAT InFormat, 
 	Info.subresourceRange.layerCount = 1;
 	checkVk(vkCreateImageView(Device, &Info, nullptr, &ImageView));
 #endif
+	GPUHandle = Pool.GPUAllocateCSU();
 }
