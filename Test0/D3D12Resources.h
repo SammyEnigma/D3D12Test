@@ -163,6 +163,7 @@ struct FUniformBuffer
 	}
 
 	D3D12_CONSTANT_BUFFER_VIEW_DESC View;
+	D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle= {0};
 	FBuffer Buffer;
 };
 
@@ -882,27 +883,27 @@ struct FDescriptorPool
 	}
 #endif
 
-	D3D12_CPU_DESCRIPTOR_HANDLE AllocateCPURTV()
+	D3D12_CPU_DESCRIPTOR_HANDLE CPUAllocateRTV()
 	{
 		D3D12_CPU_DESCRIPTOR_HANDLE NewHandle = RTVCPUStart;
 		RTVCPUStart.ptr += RTVDescriptorSize;
 		return NewHandle;
 	}
 
-	D3D12_GPU_DESCRIPTOR_HANDLE AllocateGPURTV()
+	D3D12_GPU_DESCRIPTOR_HANDLE GPUAllocateRTV()
 	{
 		D3D12_GPU_DESCRIPTOR_HANDLE NewHandle = RTVGPUStart;
 		RTVGPUStart.ptr += RTVDescriptorSize;
 		return NewHandle;
 	}
-	D3D12_CPU_DESCRIPTOR_HANDLE AllocateCPUCB()
+	D3D12_CPU_DESCRIPTOR_HANDLE CPUAllocateCSU()
 	{
 		D3D12_CPU_DESCRIPTOR_HANDLE NewHandle = CSUCPUStart;
 		CSUCPUStart.ptr += CSUDescriptorSize;
 		return NewHandle;
 	}
 
-	D3D12_GPU_DESCRIPTOR_HANDLE AllocateGPUCSU()
+	D3D12_GPU_DESCRIPTOR_HANDLE GPUAllocateCSU()
 	{
 		D3D12_GPU_DESCRIPTOR_HANDLE NewHandle = CSUGPUStart;
 		CSUGPUStart.ptr += RTVDescriptorSize;
@@ -1430,6 +1431,8 @@ inline void FUniformBuffer<TStruct>::Create(FDevice& InDevice, FDescriptorPool& 
 	View.BufferLocation = Buffer.Buffer->GetGPUVirtualAddress();
 	View.SizeInBytes = Size;
 
-	D3D12_CPU_DESCRIPTOR_HANDLE Handle = Pool.AllocateCPUCB();
+	D3D12_CPU_DESCRIPTOR_HANDLE Handle = Pool.CPUAllocateCSU();
 	InDevice.Device->CreateConstantBufferView(&View, Handle);
+
+	GPUHandle = Pool.GPUAllocateCSU();
 }

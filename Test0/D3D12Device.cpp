@@ -49,7 +49,7 @@ void FSwapchain::Create(IDXGIFactory4* DXGI, HWND Hwnd, FDevice& Device, uint32&
 		ID3D12Resource* Resource;
 		checkD3D12(Swapchain->GetBuffer(Index, IID_PPV_ARGS(&Resource)));
 		Images.push_back(Resource);
-		D3D12_CPU_DESCRIPTOR_HANDLE RTVHandle = Pool.AllocateCPURTV();
+		D3D12_CPU_DESCRIPTOR_HANDLE RTVHandle = Pool.CPUAllocateRTV();
 		Device.Device->CreateRenderTargetView(Images[Index].Get(), nullptr, RTVHandle);
 		ImageViews.push_back(RTVHandle);
 
