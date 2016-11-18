@@ -639,9 +639,15 @@ static bool LoadShadersAndGeometry()
 	{
 		FVector3 P[3] =
 		{
+#if 0
 			{0, 0.4444, 0},
 			{0.25, -0.4444, 0},
 			{-0.25, -0.4444, 0},
+#else
+			{-0.5, -0.1, 1},
+			{0.1, -0.1, 1},
+			{0, 0.5, 1},
+#endif
 		};
 
 		check(Data);
@@ -657,9 +663,9 @@ static bool LoadShadersAndGeometry()
 				Vertex->Color = PackNormalToU32(GObj.VNs[Face.Corners[Corner].Normal]);
 				Vertex->u = GObj.VTs[Face.Corners[Corner].UV].u;
 				Vertex->v = GObj.VTs[Face.Corners[Corner].UV].v;
-Vertex->x = P[Corner].x;
-Vertex->y = P[Corner].y;
-Vertex->z = P[Corner].z;
+				Vertex->x = P[Corner].x;
+				Vertex->y = P[Corner].y;
+				Vertex->z = P[Corner].z;
 ++Vertex;
 			}
 		}
@@ -935,8 +941,20 @@ static void UpdateCamera()
 	GControl.StepDirection ={0, 0, 0};
 #if ENABLE_VULKAN
 	ViewUB.View.Rows[3] = GCameraPos;
-	ViewUB.Proj = CalculateProjectionMatrix(ToRadians(60), (float)GSwapchain.GetWidth() / (float)GSwapchain.GetHeight(), 0.1f, 1000.0f);
+	ViewUB.Proj = 
 #endif
+		auto A = CalculateProjectionMatrix(ToRadians(60), (float)GSwapchain.GetWidth() / (float)GSwapchain.GetHeight(), 0.1f, 1000.0f);
+	A =A;
+
+	FVector4 P[3] =
+	{
+		{-0.5, -0.1, 0, 1},
+		{0.1, -0.1, 0, 1},
+		{0, 0.5, 0, 1},
+	};
+	auto a0 = A.Transform(P[0]);
+	auto a1 = A.Transform(P[1]);
+	auto a2 = A.Transform(P[2]);
 }
 
 static void InternalRenderFrame(FDevice* Device, /*FRenderPass* RenderPass, */FCmdBuffer* CmdBuffer, uint32 Width, uint32 Height)

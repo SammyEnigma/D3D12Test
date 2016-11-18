@@ -239,7 +239,7 @@ FGfxPipeline::FGfxPipeline()
 	ViewportInfo.pScissors = &Scissor;
 #endif
 	Desc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
-	Desc.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
+	Desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
 	Desc.RasterizerState.FrontCounterClockwise = FALSE;
 	Desc.RasterizerState.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
 	Desc.RasterizerState.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;

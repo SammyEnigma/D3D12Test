@@ -149,6 +149,11 @@ struct FVector4
 		O.w = w;
 		return O;
 	}
+
+	float Dot(const FVector4& V) const
+	{
+		return x * V.x + y * V.y + z * V.z + w * V.w;
+	}
 };
 
 struct FMatrix4x4
@@ -225,6 +230,16 @@ struct FMatrix4x4
 	{
 		Values[Row * 4 + Col] = Value;
 	}
+
+	FVector4 Transform(const FVector4& V) const
+	{
+		FVector4 Out;
+		Out.x = V.Dot(Rows[0]);
+		Out.y = V.Dot(Rows[1]);
+		Out.z = V.Dot(Rows[2]);
+		Out.w = V.Dot(Rows[3]);
+		return Out;
+	}
 };
 
 inline uint32 PackNormalToU32(const FVector3& V)
@@ -240,10 +255,11 @@ inline FMatrix4x4 CalculateProjectionMatrix(float FOVRadians, float Aspect, floa
 {
 	const float HalfTanFOV = (float)tan(FOVRadians / 2.0);
 	FMatrix4x4 New = FMatrix4x4::GetZero();
+	const float Q = FarZ / (FarZ - NearZ);
 	New.Set(0, 0, 1.0f / (Aspect * HalfTanFOV));
 	New.Set(1, 1, 1.0f / HalfTanFOV);
-	New.Set(2, 3, -1);
-	New.Set(2, 2, FarZ / (NearZ - FarZ));
-	New.Set(3, 2, -(FarZ * NearZ) / (FarZ - NearZ));
+	New.Set(2, 3, 1);
+	New.Set(2, 2, Q);
+	New.Set(3, 2, -Q * NearZ);
 	return New;
 }
