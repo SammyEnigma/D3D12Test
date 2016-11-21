@@ -288,11 +288,13 @@ struct FTestPSO : public FGfxPSO
 		AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_CBV);
 		AddRange(OutRanges, 1, D3D12_DESCRIPTOR_RANGE_TYPE_CBV);
 		AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_SRV);
+		AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER);
 
 		AddRootParam(OutRootParameters, OutRanges, 0, D3D12_SHADER_VISIBILITY_VERTEX);
 		AddRootParam(OutRootParameters, OutRanges, 1, D3D12_SHADER_VISIBILITY_VERTEX);
 		AddRootParam(OutRootParameters, OutRanges, 2, D3D12_SHADER_VISIBILITY_PIXEL);
-}
+		AddRootParam(OutRootParameters, OutRanges, 3, D3D12_SHADER_VISIBILITY_PIXEL);
+	}
 };
 FTestPSO GTestPSO;
 
@@ -845,7 +847,7 @@ bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 
 	CreateAndFillTexture();
 
-	GSampler.Create(GDevice);
+	GSampler.Create(GDevice, GDescriptorPool);
 #if ENABLE_VULKAN
 	SetupFloor();
 #endif
@@ -878,12 +880,13 @@ static void DrawCube(/*FGfxPipeline* GfxPipeline, */FDevice* Device, FCmdBuffer*
 
 	vkCmdBindDescriptorSets(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, GfxPipeline->PipelineLayout, 0, 1, &DescriptorSet, 0, nullptr);
 #endif
-	ID3D12DescriptorHeap* ppHeaps[] = {GDescriptorPool.CSUHeap.Get()};
+	ID3D12DescriptorHeap* ppHeaps[] = {GDescriptorPool.CSUHeap.Get(), GDescriptorPool.SamplerHeap.Get()};
 	CmdBuffer->CommandList->SetGraphicsRootSignature(GTestPSO.RootSignature.Get());
 	CmdBuffer->CommandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
 	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(0, GViewUB.GPUHandle);
 	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(1, GObjUB.GPUHandle);
 	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(2, GCheckerboardTexture.ImageView.GPUHandle);
+	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(3, GSampler.GPUHandle);
 
 	CmdBuffer->CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	CmdBind(CmdBuffer, &GObjVB);

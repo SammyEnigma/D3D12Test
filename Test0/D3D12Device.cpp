@@ -539,3 +539,21 @@ void FImageView::Create(FDevice& InDevice, FImage& Image, DXGI_FORMAT InFormat, 
 		GPUHandle = Pool.GPUAllocateCSU();
 	}
 }
+
+void FSampler::Create(FDevice& InDevice, FDescriptorPool& Pool)
+{
+	D3D12_SAMPLER_DESC Desc;
+	MemZero(Desc);
+	Desc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+	Desc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+	Desc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+	Desc.MipLODBias = 0;
+	Desc.MaxAnisotropy = 0;
+	Desc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+	Desc.MinLOD = 0.0f;
+	Desc.MaxLOD = D3D12_FLOAT32_MAX;
+	Desc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+	CPUHandle = Pool.CPUAllocateSampler();
+	InDevice.Device->CreateSampler(&Desc, CPUHandle);
+	GPUHandle = Pool.GPUAllocateSampler();
+}

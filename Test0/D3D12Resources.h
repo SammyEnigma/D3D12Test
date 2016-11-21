@@ -353,33 +353,9 @@ struct FImage2DWithView
 
 struct FSampler
 {
-	D3D12_STATIC_SAMPLER_DESC SamplerDesc;
-#if ENABLE_VULKAN
-	VkSampler Sampler = VK_NULL_HANDLE;
-	VkDevice Device = VK_NULL_HANDLE;
-#endif
-	void Create(FDevice& InDevice)
-	{
-		MemZero(SamplerDesc);
-		SamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
-		SamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-		SamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-		SamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-		SamplerDesc.MipLODBias = 0;
-		SamplerDesc.MaxAnisotropy = 0;
-		SamplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
-		SamplerDesc.BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
-		SamplerDesc.MinLOD = 0.0f;
-		SamplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
-		SamplerDesc.ShaderRegister = 0;
-		SamplerDesc.RegisterSpace = 0;
-		SamplerDesc.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
-		SamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-
-#if ENABLE_VULKAN
-		checkVk(vkCreateSampler(Device, &Info, nullptr, &Sampler));
-#endif
-	}
+	D3D12_CPU_DESCRIPTOR_HANDLE CPUHandle = {0};
+	D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle ={0};
+	void Create(FDevice& InDevice, FDescriptorPool& Pool);
 
 	void Destroy()
 	{
@@ -708,6 +684,7 @@ struct FDescriptorPool
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> RTVHeap;
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> CSUHeap;
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> DSVHeap;
+	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> SamplerHeap;
 
 	D3D12_CPU_DESCRIPTOR_HANDLE RTVCPUStart = {0};
 	D3D12_GPU_DESCRIPTOR_HANDLE RTVGPUStart = {0};
@@ -720,6 +697,10 @@ struct FDescriptorPool
 	D3D12_CPU_DESCRIPTOR_HANDLE DSVCPUStart ={0};
 	D3D12_GPU_DESCRIPTOR_HANDLE DSVGPUStart ={0};
 	SIZE_T DSVDescriptorSize = 0;
+
+	D3D12_CPU_DESCRIPTOR_HANDLE SamplerCPUStart ={0};
+	D3D12_GPU_DESCRIPTOR_HANDLE SamplerGPUStart ={0};
+	SIZE_T SamplerDescriptorSize = 0;
 
 	void Create(FDevice& InDevice)
 	{
@@ -748,6 +729,13 @@ struct FDescriptorPool
 			checkD3D12(InDevice.Device->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&DSVHeap)));
 		}
 
+		{
+			HeapDesc.NumDescriptors = 2048;
+			HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
+			HeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+			checkD3D12(InDevice.Device->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&SamplerHeap)));
+		}
+
 		RTVCPUStart = RTVHeap->GetCPUDescriptorHandleForHeapStart();
 		RTVGPUStart = RTVHeap->GetGPUDescriptorHandleForHeapStart();
 		RTVDescriptorSize = InDevice.Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
@@ -759,6 +747,10 @@ struct FDescriptorPool
 		DSVCPUStart = DSVHeap->GetCPUDescriptorHandleForHeapStart();
 		DSVGPUStart = DSVHeap->GetGPUDescriptorHandleForHeapStart();
 		DSVDescriptorSize = InDevice.Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+
+		SamplerCPUStart = SamplerHeap->GetCPUDescriptorHandleForHeapStart();
+		SamplerGPUStart = SamplerHeap->GetGPUDescriptorHandleForHeapStart();
+		SamplerDescriptorSize = InDevice.Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
 	}
 
 	void Destroy()
@@ -815,6 +807,20 @@ struct FDescriptorPool
 	{
 		D3D12_GPU_DESCRIPTOR_HANDLE NewHandle = DSVGPUStart;
 		DSVGPUStart.ptr += RTVDescriptorSize;
+		return NewHandle;
+	}
+
+	D3D12_CPU_DESCRIPTOR_HANDLE CPUAllocateSampler()
+	{
+		D3D12_CPU_DESCRIPTOR_HANDLE NewHandle = SamplerCPUStart;
+		SamplerCPUStart.ptr += SamplerDescriptorSize;
+		return NewHandle;
+	}
+
+	D3D12_GPU_DESCRIPTOR_HANDLE GPUAllocateSampler()
+	{
+		D3D12_GPU_DESCRIPTOR_HANDLE NewHandle = SamplerGPUStart;
+		SamplerGPUStart.ptr += SamplerDescriptorSize;
 		return NewHandle;
 	}
 };
