@@ -139,6 +139,13 @@ protected:
 };
 #endif
 
+struct FBufferAllocation
+{
+	Microsoft::WRL::ComPtr<ID3D12Resource> Buffer;
+
+	void* MappedData = nullptr;
+};
+
 struct FMemManager
 {
 	void Create(FDevice& InDevice)
@@ -151,6 +158,14 @@ struct FMemManager
 
 	void Destroy()
 	{
+		for (auto* Buffer : BufferAllocations)
+		{
+			if (Buffer->MappedData)
+			{
+				Buffer->Buffer->Unmap(0, nullptr);
+			}
+			delete Buffer;
+		}
 #if ENABLE_VULKAN
 		auto Free = [&](auto& PageMap)
 		{
@@ -211,9 +226,52 @@ struct FMemManager
 	VkPhysicalDeviceMemoryProperties Properties;
 	VkDevice Device = VK_NULL_HANDLE;
 
-	std::map<uint32, std::list<FMemPage*>> BufferPages;
 	std::map<uint32, std::list<FMemPage*>> ImagePages;
 #endif
+
+	std::list<FBufferAllocation*> BufferAllocations;
+
+	FBufferAllocation* AllocBuffer(FDevice& InDevice, uint64 InSize, bool bUploadCPU)
+	{
+		auto* NewBuffer = new FBufferAllocation;
+
+		D3D12_RESOURCE_DESC Desc;
+		MemZero(Desc);
+		Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+		Desc.Width = InSize;
+		Desc.Height = 1;
+		Desc.DepthOrArraySize = 1;
+		Desc.MipLevels = 1;
+		Desc.Format = DXGI_FORMAT_UNKNOWN;
+		Desc.SampleDesc.Count = 1;
+		Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+		D3D12_HEAP_PROPERTIES Heap;
+		MemZero(Heap);
+		Heap.Type = bUploadCPU ? D3D12_HEAP_TYPE_UPLOAD : D3D12_HEAP_TYPE_DEFAULT;
+		Heap.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+		Heap.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+		Heap.CreationNodeMask = 1;
+		Heap.VisibleNodeMask = 1;
+
+		checkD3D12(InDevice.Device->CreateCommittedResource(
+			&Heap,
+			D3D12_HEAP_FLAG_NONE,
+			&Desc,
+			D3D12_RESOURCE_STATE_GENERIC_READ,
+			nullptr,
+			IID_PPV_ARGS(&NewBuffer->Buffer)));
+		if (bUploadCPU)
+		{
+			D3D12_RANGE ReadRange;
+			MemZero(ReadRange);
+			checkD3D12(NewBuffer->Buffer->Map(0, &ReadRange, &NewBuffer->MappedData));
+		}
+		BufferAllocations.push_back(NewBuffer);
+		return NewBuffer;
+	}
+
+
 };
 
 struct FRecyclableResource

@@ -523,7 +523,7 @@ template <typename TFillLambda>
 void MapAndFillBufferSyncOneShotCmdBuffer(FDevice& Device, FBuffer* DestBuffer, TFillLambda Fill, uint32 Size)
 {
 	// HACK!
-	void* Data = DestBuffer->Map();
+	void* Data = DestBuffer->GetMappedData();
 #if ENABLE_VULKAN
 	auto* CmdBuffer = GCmdBufferMgr.AllocateCmdBuffer(Device);
 	CmdBuffer->Begin();
@@ -537,7 +537,6 @@ void MapAndFillBufferSyncOneShotCmdBuffer(FDevice& Device, FBuffer* DestBuffer, 
 	GCmdBufferMgr.Submit(CmdBuffer, GDevice.PresentQueue, nullptr, nullptr);
 	CmdBuffer->WaitForFence();
 #endif
-	DestBuffer->Unmap();
 }
 
 static bool LoadShadersAndGeometry()
@@ -627,7 +626,7 @@ static bool LoadShadersAndGeometry()
 		return false;
 	}
 
-	GObjVB.Create(GDevice, sizeof(FPosColorUVVertex), sizeof(FPosColorUVVertex) * (uint32)GObj.Faces.size() * 3, GMemMgr);
+	GObjVB.Create(GDevice, sizeof(FPosColorUVVertex), sizeof(FPosColorUVVertex) * (uint32)GObj.Faces.size() * 3, GMemMgr, true);
 	//GObj.Faces.resize(1);
 
 	auto FillObj = [](void* Data)
@@ -698,7 +697,7 @@ ResourceBarrier(CmdBuffer, GCheckerboardTexture.Image.Texture.Get(), D3D12_RESOU
 				}
 			}
 		};
-auto* StagingBuffer = GStagingManager.RequestUploadBufferForImage(GDevice, &GCheckerboardTexture.Image);
+auto* StagingBuffer = GStagingManager.RequestUploadBufferForImage(GDevice, &GCheckerboardTexture.Image, GMemMgr);
 MapAndFillImageSync(StagingBuffer, CmdBuffer, &GCheckerboardTexture.Image, FillHeightMap);
 #if ENABLE_VULKAN
 		ImageBarrier(CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, GHeightMap.GetImage(), VK_IMAGE_LAYOUT_UNDEFINED, 0, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
@@ -827,21 +826,19 @@ bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 	{
 		return false;
 	}
-	GViewUB.Create(GDevice, GDescriptorPool);
+	GViewUB.Create(GDevice, GDescriptorPool, GMemMgr, true);
 
-	GObjUB.Create(GDevice, GDescriptorPool);
-	GIdentityUB.Create(GDevice, GDescriptorPool);
+	GObjUB.Create(GDevice, GDescriptorPool, GMemMgr, true);
+	GIdentityUB.Create(GDevice, GDescriptorPool, GMemMgr, true);
 
 	{
-		FObjUB& ObjUB = *GObjUB.Map();
+		FObjUB& ObjUB = *GObjUB.GetMappedData();
 		ObjUB.Obj = FMatrix4x4::GetIdentity();
-		GObjUB.Unmap();
 	}
 
 	{
-		FObjUB& ObjUB = *GIdentityUB.Map();
+		FObjUB& ObjUB = *GIdentityUB.GetMappedData();
 		ObjUB.Obj = FMatrix4x4::GetIdentity();
-		GIdentityUB.Unmap();
 	}
 
 	GRenderTargetPool.Create();//GDevice.Device, &GMemMgr);
@@ -862,14 +859,13 @@ bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 static void DrawCube(/*FGfxPipeline* GfxPipeline, */FDevice* Device, FCmdBuffer* CmdBuffer)
 {
 	{
-		FObjUB& ObjUB = *GObjUB.Map();
+		FObjUB& ObjUB = *GObjUB.GetMappedData();
 		static float AngleDegrees = 0;
 		{
 			AngleDegrees += 360.0f / 10.0f / 60.0f;
 			AngleDegrees = fmod(AngleDegrees, 360.0f);
 		}
 		ObjUB.Obj = FMatrix4x4::GetRotationY(ToRadians(AngleDegrees));
-		GObjUB.Unmap();
 	}
 #if ENABLE_VULKAN
 	auto DescriptorSet = GDescriptorPool.AllocateDescriptorSet(GTestPSO.DSLayout);
@@ -929,7 +925,7 @@ static void SetDynamicStates(FCmdBuffer* CmdBuffer, uint32 Width, uint32 Height)
 
 static void UpdateCamera()
 {
-	FViewUB& ViewUB = *GViewUB.Map();
+	FViewUB& ViewUB = *GViewUB.GetMappedData();
 	ViewUB.View = FMatrix4x4::GetIdentity();
 	//ViewUB.View.Values[3 * 4 + 2] = -10;
 	GCameraPos = GCameraPos.Add(GControl.StepDirection.Mul3({0.01f, 0.01f, -0.01f}));
@@ -937,7 +933,6 @@ static void UpdateCamera()
 	GControl.StepDirection ={0, 0, 0};
 	ViewUB.View.Rows[3] = GCameraPos;
 	ViewUB.Proj = CalculateProjectionMatrix(ToRadians(60), (float)GSwapchain.GetWidth() / (float)GSwapchain.GetHeight(), 0.1f, 1000.0f);
-	GViewUB.Unmap();
 }
 
 static void InternalRenderFrame(FDevice* Device, /*FRenderPass* RenderPass, */FCmdBuffer* CmdBuffer, uint32 Width, uint32 Height)

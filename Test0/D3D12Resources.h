@@ -6,40 +6,11 @@
 
 struct FBuffer
 {
-	void Create(FDevice& InDevice, uint64 InSize)//, VkBufferUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropertyFlags, FMemManager* MemMgr)
+	void Create(FDevice& InDevice, uint64 InSize, FMemManager& MemMgr, bool bUploadCPU)
 	{
 		Size = InSize;
 
-		D3D12_RESOURCE_DESC Desc;
-		MemZero(Desc);
-		Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-		Desc.Width = InSize;
-		Desc.Height = 1;
-		Desc.DepthOrArraySize = 1;
-		Desc.MipLevels = 1;
-		Desc.Format = DXGI_FORMAT_UNKNOWN;
-		Desc.SampleDesc.Count = 1;
-		Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-
-		D3D12_HEAP_PROPERTIES Heap;
-		MemZero(Heap);
-		Heap.Type = D3D12_HEAP_TYPE_UPLOAD;
-		Heap.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-		Heap.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
-		Heap.CreationNodeMask = 1;
-		Heap.VisibleNodeMask = 1;
-
-		checkD3D12(InDevice.Device->CreateCommittedResource(
-			&Heap,
-			D3D12_HEAP_FLAG_NONE,
-			&Desc,
-			D3D12_RESOURCE_STATE_GENERIC_READ,
-			nullptr,
-			IID_PPV_ARGS(&Buffer)));
-#if ENABLE_VULKAN
-		SubAlloc = MemMgr->Alloc(Reqs, MemPropertyFlags, false);
-		vkBindBufferMemory(Device, Buffer, SubAlloc->GetHandle(), SubAlloc->GetBindOffset());
-#endif
+		Alloc = MemMgr.AllocBuffer(InDevice, InSize, bUploadCPU);
 	}
 
 	void Destroy()
@@ -49,30 +20,10 @@ struct FBuffer
 #endif
 	}
 
-#if ENABLE_VULKAN
 	void* GetMappedData()
 	{
-		return SubAlloc->GetMappedData();
-	}
-
-	uint64 GetBindOffset() const
-	{
-		return SubAlloc->GetBindOffset();
-	}
-#endif
-
-	void* Map()
-	{
-		D3D12_RANGE ReadRange;
-		MemZero(ReadRange);
-		void* Data;
-		checkD3D12(Buffer->Map(0, &ReadRange, &Data));
-		return Data;
-	}
-
-	void Unmap()
-	{
-		Buffer->Unmap(0, nullptr);
+		check(Alloc->MappedData);
+		return Alloc->MappedData;
 	}
 
 	uint64 GetSize() const
@@ -80,11 +31,8 @@ struct FBuffer
 		return Size;
 	}
 
-	Microsoft::WRL::ComPtr<ID3D12Resource> Buffer;
+	FBufferAllocation* Alloc = nullptr;
 	uint64 Size = 0;
-#if ENABLE_VULKAN
-	FMemSubAlloc* SubAlloc = nullptr;
-#endif
 };
 
 #if ENABLE_VULKAN
@@ -119,10 +67,10 @@ inline void CmdBind(FCmdBuffer* CmdBuffer, FIndexBuffer* IB)
 #endif
 struct FVertexBuffer
 {
-	void Create(FDevice& InDevice, uint32 Stride, uint32 Size, FMemManager& MemMgr)
+	void Create(FDevice& InDevice, uint32 Stride, uint32 Size, FMemManager& MemMgr, bool bUploadCPU)
 	{
-		Buffer.Create(InDevice, Size);
-		View.BufferLocation = Buffer.Buffer->GetGPUVirtualAddress();
+		Buffer.Create(InDevice, Size, MemMgr, bUploadCPU);
+		View.BufferLocation = Buffer.Alloc->Buffer->GetGPUVirtualAddress();
 		View.StrideInBytes = Stride;
 		View.SizeInBytes = Size;
 	}
@@ -145,16 +93,11 @@ inline void CmdBind(FCmdBuffer* CmdBuffer, FVertexBuffer* VB)
 template <typename TStruct>
 struct FUniformBuffer
 {
-	void Create(FDevice& InDevice, struct FDescriptorPool& Pool);
+	void Create(FDevice& InDevice, struct FDescriptorPool& Pool, FMemManager& MemMgr, bool bUploadCPU);
 
-	TStruct* Map()
+	TStruct* GetMappedData()
 	{
-		return (TStruct*)Buffer.Map();
-	}
-
-	void Unmap()
-	{
-		Buffer.Unmap();
+		return (TStruct*)Buffer.GetMappedData();
 	}
 
 	void Destroy()
@@ -329,7 +272,7 @@ struct FStagingManager
 		}
 	}
 
-	FStagingBuffer* RequestUploadBuffer(FDevice& InDevice, uint32 Size)
+	FStagingBuffer* RequestUploadBuffer(FDevice& InDevice, uint32 Size, FMemManager& MemMgr)
 	{
 /*
 		for (auto& Entry : Entries)
@@ -344,7 +287,7 @@ struct FStagingManager
 		}
 */
 		auto* Buffer = new FStagingBuffer;
-		Buffer->Create(InDevice, Size);//, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, MemMgr);
+		Buffer->Create(InDevice, Size, MemMgr, true);
 		FEntry Entry;
 		Entry.Buffer = Buffer;
 		Entry.bFree = false;
@@ -352,10 +295,10 @@ struct FStagingManager
 		return Buffer;
 	}
 
-	FStagingBuffer* RequestUploadBufferForImage(FDevice& InDevice, const FImage* Image)
+	FStagingBuffer* RequestUploadBufferForImage(FDevice& InDevice, const FImage* Image, FMemManager& MemMgr)
 	{
 		uint32 Size = Image->Width * Image->Height * GetFormatBitsPerPixel(Image->Format) / 8;
-		return RequestUploadBuffer(InDevice, Size);
+		return RequestUploadBuffer(InDevice, Size, MemMgr);
 	}
 
 	void Update()
@@ -1355,11 +1298,20 @@ inline void MapAndFillBufferSync(FStagingBuffer* StagingBuffer, FCmdBuffer* CmdB
 template <typename TFillLambda>
 inline void MapAndFillImageSync(FStagingBuffer* StagingBuffer, FCmdBuffer* CmdBuffer, FImage* DestImage, TFillLambda Fill)
 {
-	void* Data = StagingBuffer->Map();
+	void* Data = StagingBuffer->GetMappedData();
 	check(Data);
 	Fill(Data, DestImage->Width, DestImage->Height);
-	StagingBuffer->Unmap();
-	CmdBuffer->CommandList->CopyResource(DestImage->Texture.Get(), StagingBuffer->Buffer.Get());
+
+	/*
+	D3D12_SUBRESOURCE_DATA TextureData;
+	MemZero(TextureData);
+	TextureData.pData = &texture[0];
+	TextureData.RowPitch = TextureWidth * TexturePixelSize;
+	TextureData.SlicePitch = TextureData.RowPitch * TextureHeight;
+	*/
+
+
+	CmdBuffer->CommandList->CopyResource(DestImage->Texture.Get(), StagingBuffer->Alloc->Buffer.Get());
 #if ENABLE_VULKAN
 	{
 		VkBufferImageCopy Region;
@@ -1438,13 +1390,13 @@ inline void CmdBind(FCmdBuffer* CmdBuffer, FGfxPipeline * GfxPipeline)
 
 
 template <typename TStruct>
-inline void FUniformBuffer<TStruct>::Create(FDevice& InDevice, FDescriptorPool& Pool)
+inline void FUniformBuffer<TStruct>::Create(FDevice& InDevice, FDescriptorPool& Pool, FMemManager& MemMgr, bool bUploadCPU)
 {
 	uint32 Size = (sizeof(TStruct) + 255) & ~255;
-	Buffer.Create(InDevice, Size);//, UsageFlags, MemPropertyFlags, MemMgr);
+	Buffer.Create(InDevice, Size, MemMgr, bUploadCPU);
 
 	MemZero(View);
-	View.BufferLocation = Buffer.Buffer->GetGPUVirtualAddress();
+	View.BufferLocation = Buffer.Alloc->Buffer->GetGPUVirtualAddress();
 	View.SizeInBytes = Size;
 
 	D3D12_CPU_DESCRIPTOR_HANDLE Handle = Pool.CPUAllocateCSU();
