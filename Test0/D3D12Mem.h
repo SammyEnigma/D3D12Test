@@ -139,10 +139,13 @@ protected:
 };
 #endif
 
-struct FBufferAllocation
+struct FResourceAllocation
 {
-	Microsoft::WRL::ComPtr<ID3D12Resource> Buffer;
+	Microsoft::WRL::ComPtr<ID3D12Resource> Resource;
+};
 
+struct FBufferAllocation : public FResourceAllocation
+{
 	void* MappedData = nullptr;
 };
 
@@ -162,7 +165,7 @@ struct FMemManager
 		{
 			if (Buffer->MappedData)
 			{
-				Buffer->Buffer->Unmap(0, nullptr);
+				Buffer->Resource->Unmap(0, nullptr);
 			}
 			delete Buffer;
 		}
@@ -230,6 +233,7 @@ struct FMemManager
 #endif
 
 	std::list<FBufferAllocation*> BufferAllocations;
+	std::list<FResourceAllocation*> ResourceAllocations;
 
 	FBufferAllocation* AllocBuffer(FDevice& InDevice, uint64 InSize, bool bUploadCPU)
 	{
@@ -260,15 +264,52 @@ struct FMemManager
 			&Desc,
 			D3D12_RESOURCE_STATE_GENERIC_READ,
 			nullptr,
-			IID_PPV_ARGS(&NewBuffer->Buffer)));
+			IID_PPV_ARGS(&NewBuffer->Resource)));
 		if (bUploadCPU)
 		{
 			D3D12_RANGE ReadRange;
 			MemZero(ReadRange);
-			checkD3D12(NewBuffer->Buffer->Map(0, &ReadRange, &NewBuffer->MappedData));
+			checkD3D12(NewBuffer->Resource->Map(0, &ReadRange, &NewBuffer->MappedData));
 		}
 		BufferAllocations.push_back(NewBuffer);
 		return NewBuffer;
+	}
+
+
+
+	FResourceAllocation* AllocTexture2D(FDevice& InDevice, uint32 Width, uint32 Height, DXGI_FORMAT Format, bool bUploadCPU)
+	{
+		auto* NewResource = new FResourceAllocation;
+
+		D3D12_RESOURCE_DESC Desc;
+		MemZero(Desc);
+		Desc.MipLevels = 1;
+		Desc.Format = Format;
+		Desc.Width = Width;
+		Desc.Height = Height;
+		Desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+		Desc.DepthOrArraySize = 1;
+		Desc.SampleDesc.Count = 1;
+		Desc.SampleDesc.Quality = 0;
+		Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+
+		D3D12_HEAP_PROPERTIES Heap;
+		MemZero(Heap);
+		Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+		Heap.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+		Heap.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+		Heap.CreationNodeMask = 1;
+		Heap.VisibleNodeMask = 1;
+
+		checkD3D12(InDevice.Device->CreateCommittedResource(
+			&Heap,
+			D3D12_HEAP_FLAG_NONE,
+			&Desc,
+			D3D12_RESOURCE_STATE_COPY_DEST,
+			nullptr,
+			IID_PPV_ARGS(&NewResource->Resource)));
+		ResourceAllocations.push_back(NewResource);
+		return NewResource;
 	}
 
 

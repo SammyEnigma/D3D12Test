@@ -70,7 +70,7 @@ struct FVertexBuffer
 	void Create(FDevice& InDevice, uint32 Stride, uint32 Size, FMemManager& MemMgr, bool bUploadCPU)
 	{
 		Buffer.Create(InDevice, Size, MemMgr, bUploadCPU);
-		View.BufferLocation = Buffer.Alloc->Buffer->GetGPUVirtualAddress();
+		View.BufferLocation = Buffer.Alloc->Resource->GetGPUVirtualAddress();
 		View.StrideInBytes = Stride;
 		View.SizeInBytes = Size;
 	}
@@ -112,11 +112,12 @@ struct FUniformBuffer
 
 struct FImage
 {
-	Microsoft::WRL::ComPtr<ID3D12Resource> Texture;
+	//Microsoft::WRL::ComPtr<ID3D12Resource> Texture;
+	FResourceAllocation* Alloc = nullptr;
 
-	void Create(FDevice& InDevice, uint32 InWidth, uint32 InHeight, DXGI_FORMAT InFormat
+	void Create(FDevice& InDevice, uint32 InWidth, uint32 InHeight, DXGI_FORMAT InFormat, FMemManager& MemMgr
 #if ENABLE_VULKAN
-		, VkImageUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropertyFlags, FMemManager* MemMgr, uint32 InNumMips, VkSampleCountFlagBits InSamples
+		, VkImageUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropertyFlags, uint32 InNumMips, VkSampleCountFlagBits InSamples
 #endif
 	)
 	{
@@ -128,33 +129,7 @@ struct FImage
 		NumMips = InNumMips;
 		Samples = InSamples;
 #endif
-		D3D12_RESOURCE_DESC Desc;
-		MemZero(Desc);
-		Desc.MipLevels = 1;
-		Desc.Format = Format;
-		Desc.Width = Width;
-		Desc.Height = Height;
-		Desc.Flags = D3D12_RESOURCE_FLAG_NONE;
-		Desc.DepthOrArraySize = 1;
-		Desc.SampleDesc.Count = 1;
-		Desc.SampleDesc.Quality = 0;
-		Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-
-		D3D12_HEAP_PROPERTIES Heap;
-		MemZero(Heap);
-		Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
-		Heap.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-		Heap.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
-		Heap.CreationNodeMask = 1;
-		Heap.VisibleNodeMask = 1;
-
-		checkD3D12(InDevice.Device->CreateCommittedResource(
-			&Heap,
-			D3D12_HEAP_FLAG_NONE,
-			&Desc,
-			D3D12_RESOURCE_STATE_COPY_DEST,
-			nullptr,
-			IID_PPV_ARGS(&Texture)));
+		Alloc = MemMgr.AllocTexture2D(InDevice, Width, Height, Format, false);
 
 #if ENABLE_VULKAN
 		VkImageCreateInfo ImageInfo;
@@ -368,15 +343,15 @@ inline VkImageAspectFlags GetImageAspectFlags(VkFormat Format)
 
 struct FImage2DWithView
 {
-	void Create(FDevice& InDevice, uint32 InWidth, uint32 InHeight, DXGI_FORMAT Format, FDescriptorPool& Pool
+	void Create(FDevice& InDevice, uint32 InWidth, uint32 InHeight, DXGI_FORMAT Format, FDescriptorPool& Pool, FMemManager& MemMgr
 #if ENABLE_VULKAN
-		, VkImageUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropertyFlags, FMemManager* MemMgr, uint32 InNumMips = 1, VkSampleCountFlagBits Samples = VK_SAMPLE_COUNT_1_BIT
+		, VkImageUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropertyFlags, uint32 InNumMips = 1, VkSampleCountFlagBits Samples = VK_SAMPLE_COUNT_1_BIT
 #endif
 	)
 	{
-		Image.Create(InDevice, InWidth, InHeight, Format
+		Image.Create(InDevice, InWidth, InHeight, Format, MemMgr
 #if ENABLE_VULKAN
-			, UsageFlags, MemPropertyFlags, MemMgr, InNumMips, Samples
+			, UsageFlags, MemPropertyFlags, InNumMips, Samples
 #endif
 		);
 
@@ -1135,17 +1110,22 @@ protected:
 };
 #endif
 
-inline void ResourceBarrier(FCmdBuffer* CmdBuffer, ID3D12Resource* Resource, D3D12_RESOURCE_STATES Src, D3D12_RESOURCE_STATES Dest)
+inline void ResourceBarrier(FCmdBuffer* CmdBuffer, ID3D12Resource* Image, D3D12_RESOURCE_STATES Src, D3D12_RESOURCE_STATES Dest)
 {
 	D3D12_RESOURCE_BARRIER Barrier;
 	MemZero(Barrier);
 	Barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 	Barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-	Barrier.Transition.pResource = Resource;
+	Barrier.Transition.pResource = Image;
 	Barrier.Transition.StateBefore = Src;
 	Barrier.Transition.StateAfter = Dest;
 	Barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
 	CmdBuffer->CommandList->ResourceBarrier(1, &Barrier);
+}
+
+inline void ResourceBarrier(FCmdBuffer* CmdBuffer, FImage* Image, D3D12_RESOURCE_STATES Src, D3D12_RESOURCE_STATES Dest)
+{
+	ResourceBarrier(CmdBuffer, Image->Alloc->Resource.Get(), Src, Dest);
 }
 
 #if ENABLE_VULKAN
@@ -1306,7 +1286,7 @@ inline void MapAndFillImageSync(FStagingBuffer* StagingBuffer, FCmdBuffer* CmdBu
 	D3D12_TEXTURE_COPY_LOCATION Src;
 	MemZero(Src);
 	Src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-	Src.pResource = StagingBuffer->Alloc->Buffer.Get();
+	Src.pResource = StagingBuffer->Alloc->Resource.Get();
 	Src.PlacedFootprint.Footprint.Format = DestImage->Format;
 	Src.PlacedFootprint.Footprint.Width = DestImage->Width;
 	Src.PlacedFootprint.Footprint.Height = DestImage->Height;
@@ -1315,7 +1295,7 @@ inline void MapAndFillImageSync(FStagingBuffer* StagingBuffer, FCmdBuffer* CmdBu
 	D3D12_TEXTURE_COPY_LOCATION Dest;
 	MemZero(Dest);
 	Dest.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-	Dest.pResource = DestImage->Texture.Get();
+	Dest.pResource = DestImage->Alloc->Resource.Get();
 
 	D3D12_BOX SrcBox;
 	MemZero(SrcBox);
@@ -1393,7 +1373,7 @@ inline void FUniformBuffer<TStruct>::Create(FDevice& InDevice, FDescriptorPool& 
 	Buffer.Create(InDevice, Size, MemMgr, bUploadCPU);
 
 	MemZero(View);
-	View.BufferLocation = Buffer.Alloc->Buffer->GetGPUVirtualAddress();
+	View.BufferLocation = Buffer.Alloc->Resource->GetGPUVirtualAddress();
 	View.SizeInBytes = Size;
 
 	D3D12_CPU_DESCRIPTOR_HANDLE Handle = Pool.CPUAllocateCSU();

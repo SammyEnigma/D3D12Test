@@ -497,7 +497,7 @@ void FImageView::Create(FDevice& InDevice, FImage& Image, DXGI_FORMAT InFormat, 
 	Desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
 	Desc.Texture2D.MipLevels = 1;
 	CPUHandle = Pool.CPUAllocateCSU();
-	InDevice.Device->CreateShaderResourceView(Image.Texture.Get(), &Desc, CPUHandle);
+	InDevice.Device->CreateShaderResourceView(Image.Alloc->Resource.Get(), &Desc, CPUHandle);
 
 #if ENABLE_VULKAN
 	Format = InFormat;

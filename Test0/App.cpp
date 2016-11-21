@@ -176,7 +176,7 @@ struct FRenderTargetPool
 		}
 	}
 
-	FEntry* Acquire(FDevice* Device, const char* InName, uint32 Width, uint32 Height, DXGI_FORMAT Format)//, VkImageUsageFlags Usage, VkMemoryPropertyFlagBits MemProperties, uint32 NumMips, VkSampleCountFlagBits Samples)
+	FEntry* Acquire(FDevice* Device, const char* InName, uint32 Width, uint32 Height, DXGI_FORMAT Format, FMemManager& MemMgr)//, VkImageUsageFlags Usage, VkMemoryPropertyFlagBits MemProperties, uint32 NumMips, VkSampleCountFlagBits Samples)
 	{
 		::EnterCriticalSection(&CS);
 		for (auto* Entry : Entries)
@@ -215,9 +215,9 @@ struct FRenderTargetPool
 		Entry->Name = InName;
 #endif
 
-		Entry->Texture.Create(*Device, Width, Height, Format, GDescriptorPool
+		Entry->Texture.Create(*Device, Width, Height, Format, GDescriptorPool, MemMgr
 #if ENABLE_VULKAN
-			, Usage, MemProperties, MemMgr, NumMips, Samples
+			, Usage, MemProperties, NumMips, Samples
 #endif
 		);
 
@@ -655,7 +655,7 @@ static bool LoadShadersAndGeometry()
 void CreateAndFillTexture()
 {
 	srand(0);
-	GCheckerboardTexture.Create(GDevice, 64, 64, DXGI_FORMAT_R8G8B8A8_UNORM, GDescriptorPool);//, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &GMemMgr, 1);
+	GCheckerboardTexture.Create(GDevice, 64, 64, DXGI_FORMAT_R8G8B8A8_UNORM, GDescriptorPool, GMemMgr);//, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &GMemMgr, 1);
 #if ENABLE_VULKAN
 	GHeightMap.Create(GDevice.Device, 64, 64, VK_FORMAT_R32_SFLOAT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &GMemMgr, 1);
 
@@ -684,7 +684,7 @@ void CreateAndFillTexture()
 
 	//#todo-rco: Fill in checkerboard on CS, and height with random!
 	{
-ResourceBarrier(CmdBuffer, GCheckerboardTexture.Image.Texture.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
+ResourceBarrier(CmdBuffer, &GCheckerboardTexture.Image, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
 		auto FillHeightMap = [](void* Data, uint32 Width, uint32 Height)
 		{
 			float* Out = (float*)Data;
@@ -707,7 +707,7 @@ MapAndFillImageSync(StagingBuffer, CmdBuffer, &GCheckerboardTexture.Image, FillH
 
 		ImageBarrier(CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, GHeightMap.GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
 #endif
-ResourceBarrier(CmdBuffer, GCheckerboardTexture.Image.Texture.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+ResourceBarrier(CmdBuffer, &GCheckerboardTexture.Image, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 	}
 	CmdBuffer->End();
 	GCmdBufferMgr.Submit(GDevice, CmdBuffer);
@@ -1069,7 +1069,7 @@ void DoRender()
 		CmdBuffer->CommandList->ClearRenderTargetView(GSwapchain.GetAcquiredImageView(), ClearColor, 0, nullptr);
 	}
 
-	auto* SceneColor = GRenderTargetPool.Acquire(&GDevice, GControl.DoMSAA ? "SceneColorMSAA" : "SceneColor", GSwapchain.GetWidth(), GSwapchain.GetHeight(), DXGI_FORMAT_R8G8B8A8_UNORM
+	auto* SceneColor = GRenderTargetPool.Acquire(&GDevice, GControl.DoMSAA ? "SceneColorMSAA" : "SceneColor", GSwapchain.GetWidth(), GSwapchain.GetHeight(), DXGI_FORMAT_R8G8B8A8_UNORM, GMemMgr
 #if ENABLE_VULKAN
 		, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 1, GControl.DoMSAA ? VK_SAMPLE_COUNT_4_BIT : VK_SAMPLE_COUNT_1_BIT
 #endif
