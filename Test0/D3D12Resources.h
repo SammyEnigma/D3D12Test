@@ -246,6 +246,7 @@ struct FStagingBuffer : public FBuffer
 
 	bool IsSignaled() const
 	{
+		check(CmdBuffer);
 		return FenceCounter < CmdBuffer->Fence.FenceSignaledCounter;
 	}
 };
@@ -274,7 +275,7 @@ struct FStagingManager
 
 	FStagingBuffer* RequestUploadBuffer(FDevice& InDevice, uint32 Size, FMemManager& MemMgr)
 	{
-/*
+		Update();
 		for (auto& Entry : Entries)
 		{
 			if (Entry.bFree && Entry.Buffer->Size == Size)
@@ -285,7 +286,7 @@ struct FStagingManager
 				return Entry.Buffer;
 			}
 		}
-*/
+
 		auto* Buffer = new FStagingBuffer;
 		Buffer->Create(InDevice, Size, MemMgr, true);
 		FEntry Entry;
@@ -1302,31 +1303,27 @@ inline void MapAndFillImageSync(FStagingBuffer* StagingBuffer, FCmdBuffer* CmdBu
 	check(Data);
 	Fill(Data, DestImage->Width, DestImage->Height);
 
-	/*
-	D3D12_SUBRESOURCE_DATA TextureData;
-	MemZero(TextureData);
-	TextureData.pData = &texture[0];
-	TextureData.RowPitch = TextureWidth * TexturePixelSize;
-	TextureData.SlicePitch = TextureData.RowPitch * TextureHeight;
-	*/
+	D3D12_TEXTURE_COPY_LOCATION Src;
+	MemZero(Src);
+	Src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+	Src.pResource = StagingBuffer->Alloc->Buffer.Get();
+	Src.PlacedFootprint.Footprint.Format = DestImage->Format;
+	Src.PlacedFootprint.Footprint.Width = DestImage->Width;
+	Src.PlacedFootprint.Footprint.Height = DestImage->Height;
+	Src.PlacedFootprint.Footprint.Depth = 1;
+	Src.PlacedFootprint.Footprint.RowPitch = DestImage->Width * GetFormatBitsPerPixel(DestImage->Format) / 8;
+	D3D12_TEXTURE_COPY_LOCATION Dest;
+	MemZero(Dest);
+	Dest.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+	Dest.pResource = DestImage->Texture.Get();
 
+	D3D12_BOX SrcBox;
+	MemZero(SrcBox);
+	SrcBox.right = DestImage->Width;
+	SrcBox.bottom = DestImage->Height;
+	SrcBox.back = 1;
+	CmdBuffer->CommandList->CopyTextureRegion(&Dest, 0, 0, 0, &Src, &SrcBox);
 
-	CmdBuffer->CommandList->CopyResource(DestImage->Texture.Get(), StagingBuffer->Alloc->Buffer.Get());
-#if ENABLE_VULKAN
-	{
-		VkBufferImageCopy Region;
-		MemZero(Region);
-		Region.bufferOffset = StagingBuffer->GetBindOffset();
-		Region.bufferRowLength = DestImage->Width;
-		Region.bufferImageHeight = DestImage->Height;
-		Region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		Region.imageSubresource.layerCount = 1;
-		Region.imageExtent.width = DestImage->Width;
-		Region.imageExtent.height = DestImage->Height;
-		Region.imageExtent.depth = 1;
-		vkCmdCopyBufferToImage(CmdBuffer->CmdBuffer, StagingBuffer->Buffer, DestImage->Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
-	}
-#endif
 	StagingBuffer->SetFence(CmdBuffer);
 }
 
