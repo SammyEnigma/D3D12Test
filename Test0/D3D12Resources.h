@@ -130,30 +130,6 @@ struct FImage
 		Samples = InSamples;
 #endif
 		Alloc = MemMgr.AllocTexture2D(InDevice, Width, Height, Format, false);
-
-#if ENABLE_VULKAN
-		VkImageCreateInfo ImageInfo;
-		MemZero(ImageInfo);
-		ImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-		ImageInfo.imageType = VK_IMAGE_TYPE_2D;
-		ImageInfo.format = Format;
-		ImageInfo.extent.width = Width;
-		ImageInfo.extent.height = Height;
-		ImageInfo.extent.depth = 1;
-		ImageInfo.mipLevels = NumMips;
-		ImageInfo.arrayLayers = 1;
-		ImageInfo.samples = Samples;
-		ImageInfo.tiling = (MemPropertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0 ? VK_IMAGE_TILING_LINEAR : VK_IMAGE_TILING_OPTIMAL;
-		ImageInfo.usage = UsageFlags;
-		ImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-		checkVk(vkCreateImage(Device, &ImageInfo, nullptr, &Image));
-
-		vkGetImageMemoryRequirements(Device, Image, &Reqs);
-
-		SubAlloc = MemMgr->Alloc(Reqs, MemPropertyFlags, true);
-
-		vkBindImageMemory(Device, Image, SubAlloc->GetHandle(), SubAlloc->GetBindOffset());
-#endif
 	}
 
 	void Destroy()
@@ -196,6 +172,7 @@ struct FImageView
 	D3D12_CPU_DESCRIPTOR_HANDLE CPUHandle = {0};
 	D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle ={0};
 	D3D12_SHADER_RESOURCE_VIEW_DESC Desc;
+	DXGI_FORMAT Format = DXGI_FORMAT_UNKNOWN;
 
 	void Create(FDevice& InDevice, FImage& Image, DXGI_FORMAT InFormat, FDescriptorPool& Pool);
 
@@ -231,9 +208,6 @@ struct FStagingManager
 	FMemManager* MemMgr = nullptr;
 	void Create(FDevice& InDevice, FMemManager* InMemMgr)
 	{
-#if ENABLE_VULKAN
-		Device = InDevice;
-#endif
 		MemMgr = InMemMgr;
 	}
 
@@ -366,12 +340,13 @@ struct FImage2DWithView
 
 	FImage Image;
 	FImageView ImageView;
-#if ENABLE_VULKAN
 
-	inline VkFormat GetFormat() const
+	inline DXGI_FORMAT GetFormat() const
 	{
 		return ImageView.Format;
 	}
+
+#if ENABLE_VULKAN
 
 	inline VkImage GetImage() const
 	{

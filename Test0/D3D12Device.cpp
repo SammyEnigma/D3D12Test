@@ -491,6 +491,8 @@ void FSwapchain::ClearAndTransitionToPresent(FDevice& Device, FCmdBuffer* CmdBuf
 
 void FImageView::Create(FDevice& InDevice, FImage& Image, DXGI_FORMAT InFormat, FDescriptorPool& Pool)
 {
+	Format = InFormat;
+
 	MemZero(Desc);
 	Desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 	Desc.Format = InFormat;
