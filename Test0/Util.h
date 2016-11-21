@@ -272,3 +272,18 @@ inline FMatrix4x4 CalculateProjectionMatrix(float FOVRadians, float Aspect, floa
 	New.Set(3, 2, -Q * NearZ);
 	return New;
 }
+
+inline bool IsDepthOrStencilFormat(DXGI_FORMAT Format)
+{
+	switch (Format)
+	{
+	case DXGI_FORMAT_D16_UNORM:
+	case DXGI_FORMAT_D24_UNORM_S8_UINT:
+	case DXGI_FORMAT_D32_FLOAT:
+	case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
+		return true;
+
+	default:
+		return false;
+	}
+}

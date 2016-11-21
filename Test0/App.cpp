@@ -185,10 +185,10 @@ struct FRenderTargetPool
 			{
 				FImage& Image = Entry->Texture.Image;
 				if (Image.Width == Width && 
-					Image.Height == Height 
+					Image.Height == Height &&
+					Image.Format == Format
 #if ENABLE_VULKAN
 					&&
-					Image.Format == Format &&
 					Image.NumMips == NumMips &&
 					Image.Samples == Samples &&
 					Entry->Usage == Usage &&
@@ -915,6 +915,8 @@ static void SetDynamicStates(FCmdBuffer* CmdBuffer, uint32 Width, uint32 Height)
 	MemZero(Viewport);
 	Viewport.Width = (float)Width;
 	Viewport.Height = (float)Height;
+	Viewport.MinDepth = 0;
+	Viewport.MaxDepth = 1;
 	CmdBuffer->CommandList->RSSetViewports(1, &Viewport);
 	D3D12_RECT Scissor;
 	MemZero(Scissor);
@@ -948,7 +950,7 @@ static void InternalRenderFrame(FDevice* Device, /*FRenderPass* RenderPass, */FC
 	DrawCube(/*GfxPipeline, */Device, CmdBuffer);
 }
 
-static void RenderFrame(FDevice* Device, FCmdBuffer* CmdBuffer, FImage2DWithView* ColorBuffer/*, FImage2DWithView* DepthBuffer, FImage2DWithView* ResolveColorBuffer*/)
+static void RenderFrame(FDevice* Device, FCmdBuffer* CmdBuffer, FImage2DWithView* ColorBuffer, FImage2DWithView* DepthBuffer/*, FImage2DWithView* ResolveColorBuffer*/)
 {
 	UpdateCamera();
 
@@ -961,7 +963,7 @@ static void RenderFrame(FDevice* Device, FCmdBuffer* CmdBuffer, FImage2DWithView
 
 	CmdBuffer->BeginRenderPass(RenderPass->RenderPass, *Framebuffer, TRY_MULTITHREADED == 1);
 #endif
-	CmdBuffer->CommandList->OMSetRenderTargets(1, &GSwapchain.GetAcquiredImageView(), false, nullptr);
+	CmdBuffer->CommandList->OMSetRenderTargets(1, &GSwapchain.GetAcquiredImageView(), false, &DepthBuffer->ImageView.CPUHandle);
 #if TRY_MULTITHREADED == 1
 	{
 		GThread.ParentCmdBuffer = CmdBuffer;
@@ -1080,8 +1082,10 @@ void DoRender()
 	//TestCompute(CmdBuffer);
 
 	VkFormat ColorFormat = (VkFormat)GSwapchain.BACKBUFFER_VIEW_FORMAT;
-
-	auto* DepthBuffer = GRenderTargetPool.Acquire("DepthBuffer", GSwapchain.GetWidth(), GSwapchain.GetHeight(), VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 1, SceneColor->Texture.Image.Samples);
+#endif
+	auto* DepthBuffer = GRenderTargetPool.Acquire(&GDevice, "DepthBuffer", GSwapchain.GetWidth(), GSwapchain.GetHeight(), DXGI_FORMAT_D32_FLOAT, GMemMgr);// VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 1, SceneColor->Texture.Image.Samples);
+	CmdBuffer->CommandList->ClearDepthStencilView(DepthBuffer->Texture.ImageView.CPUHandle, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
+#if ENABLE_VULKAN
 	DepthBuffer->DoTransition(CmdBuffer, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
 	if (GControl.DoMSAA)
@@ -1113,7 +1117,7 @@ void DoRender()
 	else
 #endif
 	{
-		RenderFrame(&GDevice, CmdBuffer, &SceneColor->Texture/*, &DepthBuffer->Texture, nullptr*/);
+		RenderFrame(&GDevice, CmdBuffer, &SceneColor->Texture, &DepthBuffer->Texture/*, nullptr*/);
 	}
 
 #if ENABLE_VULKAN

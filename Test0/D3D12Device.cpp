@@ -366,12 +366,15 @@ void FGfxPipeline::Create(FDevice* Device, FGfxPSO* PSO, FVertexFormat* VertexFo
 	PipelineInfo.layout = PipelineLayout;
 #endif
 
-	Desc.DepthStencilState.DepthEnable = FALSE;
+	Desc.DepthStencilState.DepthEnable = TRUE;
 	Desc.DepthStencilState.StencilEnable = FALSE;
+	Desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+	Desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
 	Desc.SampleMask = UINT_MAX;
 	Desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 	Desc.NumRenderTargets = 1;
 	Desc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+	Desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 	Desc.SampleDesc.Count = 1;
 	checkD3D12(Device->Device->CreateGraphicsPipelineState(&Desc, IID_PPV_ARGS(&PipelineState)));
 }
@@ -493,31 +496,46 @@ void FImageView::Create(FDevice& InDevice, FImage& Image, DXGI_FORMAT InFormat, 
 {
 	Format = InFormat;
 
-	MemZero(Desc);
-	Desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-	Desc.Format = InFormat;
-	Desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-	Desc.Texture2D.MipLevels = 1;
-	CPUHandle = Pool.CPUAllocateCSU();
-	InDevice.Device->CreateShaderResourceView(Image.Alloc->Resource.Get(), &Desc, CPUHandle);
+	if (IsDepthOrStencilFormat(Format))
+	{
+		D3D12_DEPTH_STENCIL_VIEW_DESC Desc;
+		MemZero(Desc);
+		Desc.Format = InFormat;
+		Desc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+		//Desc.Flags = ;
+		CPUHandle = Pool.CPUAllocateDSV();
+		InDevice.Device->CreateDepthStencilView(Image.Alloc->Resource.Get(), &Desc, CPUHandle);
+		GPUHandle = Pool.GPUAllocateCSU();
+	}
+	else
+	{
+		D3D12_SHADER_RESOURCE_VIEW_DESC Desc;
+		MemZero(Desc);
+		Desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		Desc.Format = InFormat;
+		Desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+		Desc.Texture2D.MipLevels = 1;
+		CPUHandle = Pool.CPUAllocateCSU();
+		InDevice.Device->CreateShaderResourceView(Image.Alloc->Resource.Get(), &Desc, CPUHandle);
 
 #if ENABLE_VULKAN
-	Format = InFormat;
+		Format = InFormat;
 
-	VkImageViewCreateInfo Info;
-	MemZero(Info);
-	Info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-	Info.image = Image;
-	Info.viewType = ViewType;
-	Info.format = Format;
-	Info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-	Info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-	Info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-	Info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-	Info.subresourceRange.aspectMask = ImageAspect;
-	Info.subresourceRange.levelCount = 1;
-	Info.subresourceRange.layerCount = 1;
-	checkVk(vkCreateImageView(Device, &Info, nullptr, &ImageView));
+		VkImageViewCreateInfo Info;
+		MemZero(Info);
+		Info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+		Info.image = Image;
+		Info.viewType = ViewType;
+		Info.format = Format;
+		Info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+		Info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+		Info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+		Info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+		Info.subresourceRange.aspectMask = ImageAspect;
+		Info.subresourceRange.levelCount = 1;
+		Info.subresourceRange.layerCount = 1;
+		checkVk(vkCreateImageView(Device, &Info, nullptr, &ImageView));
 #endif
-	GPUHandle = Pool.GPUAllocateCSU();
+		GPUHandle = Pool.GPUAllocateCSU();
+	}
 }

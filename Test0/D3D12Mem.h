@@ -287,7 +287,7 @@ struct FMemManager
 		Desc.Format = Format;
 		Desc.Width = Width;
 		Desc.Height = Height;
-		Desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+		Desc.Flags = IsDepthOrStencilFormat(Format) ? D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL : D3D12_RESOURCE_FLAG_NONE;
 		Desc.DepthOrArraySize = 1;
 		Desc.SampleDesc.Count = 1;
 		Desc.SampleDesc.Quality = 0;
@@ -301,12 +301,17 @@ struct FMemManager
 		Heap.CreationNodeMask = 1;
 		Heap.VisibleNodeMask = 1;
 
+		D3D12_CLEAR_VALUE ClearValue;
+		MemZero(ClearValue);
+		ClearValue.Format = Format;
+		ClearValue.DepthStencil.Depth = 1;
+
 		checkD3D12(InDevice.Device->CreateCommittedResource(
 			&Heap,
 			D3D12_HEAP_FLAG_NONE,
 			&Desc,
-			D3D12_RESOURCE_STATE_COPY_DEST,
-			nullptr,
+			IsDepthOrStencilFormat(Format) ? D3D12_RESOURCE_STATE_DEPTH_WRITE : D3D12_RESOURCE_STATE_COPY_DEST,
+			IsDepthOrStencilFormat(Format) ? &ClearValue : nullptr,
 			IID_PPV_ARGS(&NewResource->Resource)));
 		ResourceAllocations.push_back(NewResource);
 		return NewResource;

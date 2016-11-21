@@ -171,7 +171,6 @@ struct FImageView
 {
 	D3D12_CPU_DESCRIPTOR_HANDLE CPUHandle = {0};
 	D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle ={0};
-	D3D12_SHADER_RESOURCE_VIEW_DESC Desc;
 	DXGI_FORMAT Format = DXGI_FORMAT_UNKNOWN;
 
 	void Create(FDevice& InDevice, FImage& Image, DXGI_FORMAT InFormat, FDescriptorPool& Pool);
@@ -274,24 +273,6 @@ struct FStagingManager
 };
 
 #if ENABLE_VULKAN
-inline bool IsDepthOrStencilFormat(VkFormat Format)
-{
-	switch (Format)
-	{
-	case VK_FORMAT_D16_UNORM:
-	case VK_FORMAT_X8_D24_UNORM_PACK32:
-	case VK_FORMAT_D32_SFLOAT:
-	case VK_FORMAT_S8_UINT:
-	case VK_FORMAT_D16_UNORM_S8_UINT:
-	case VK_FORMAT_D24_UNORM_S8_UINT:
-	case VK_FORMAT_D32_SFLOAT_S8_UINT:
-		return true;
-
-	default:
-		return false;
-	}
-}
-
 inline VkImageAspectFlags GetImageAspectFlags(VkFormat Format)
 {
 	switch (Format)
@@ -726,6 +707,8 @@ struct FDescriptorPool
 {
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> RTVHeap;
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> CSUHeap;
+	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> DSVHeap;
+
 	D3D12_CPU_DESCRIPTOR_HANDLE RTVCPUStart = {0};
 	D3D12_GPU_DESCRIPTOR_HANDLE RTVGPUStart = {0};
 	SIZE_T RTVDescriptorSize = 0;
@@ -733,6 +716,10 @@ struct FDescriptorPool
 	D3D12_CPU_DESCRIPTOR_HANDLE CSUCPUStart ={0};
 	D3D12_GPU_DESCRIPTOR_HANDLE CSUGPUStart ={0};
 	SIZE_T CSUDescriptorSize = 0;
+
+	D3D12_CPU_DESCRIPTOR_HANDLE DSVCPUStart ={0};
+	D3D12_GPU_DESCRIPTOR_HANDLE DSVGPUStart ={0};
+	SIZE_T DSVDescriptorSize = 0;
 
 	void Create(FDevice& InDevice)
 	{
@@ -754,6 +741,13 @@ struct FDescriptorPool
 			checkD3D12(InDevice.Device->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&CSUHeap)));
 		}
 
+		{
+			HeapDesc.NumDescriptors = 32768;
+			HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+			HeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+			checkD3D12(InDevice.Device->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&DSVHeap)));
+		}
+
 		RTVCPUStart = RTVHeap->GetCPUDescriptorHandleForHeapStart();
 		RTVGPUStart = RTVHeap->GetGPUDescriptorHandleForHeapStart();
 		RTVDescriptorSize = InDevice.Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
@@ -762,15 +756,9 @@ struct FDescriptorPool
 		CSUGPUStart = CSUHeap->GetGPUDescriptorHandleForHeapStart();
 		CSUDescriptorSize = InDevice.Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
-#if ENABLE_VULKAN
-		AddPool(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 32768);
-		AddPool(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 16384);
-		AddPool(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 32768);
-		AddPool(VK_DESCRIPTOR_TYPE_SAMPLER, 32768);
-		AddPool(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 32768);
-		AddPool(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 16384);
-		AddPool(VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 16384);
-#endif
+		DSVCPUStart = DSVHeap->GetCPUDescriptorHandleForHeapStart();
+		DSVGPUStart = DSVHeap->GetGPUDescriptorHandleForHeapStart();
+		DSVDescriptorSize = InDevice.Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
 	}
 
 	void Destroy()
@@ -813,6 +801,20 @@ struct FDescriptorPool
 	{
 		D3D12_GPU_DESCRIPTOR_HANDLE NewHandle = CSUGPUStart;
 		CSUGPUStart.ptr += RTVDescriptorSize;
+		return NewHandle;
+	}
+
+	D3D12_CPU_DESCRIPTOR_HANDLE CPUAllocateDSV()
+	{
+		D3D12_CPU_DESCRIPTOR_HANDLE NewHandle = DSVCPUStart;
+		DSVCPUStart.ptr += DSVDescriptorSize;
+		return NewHandle;
+	}
+
+	D3D12_GPU_DESCRIPTOR_HANDLE GPUAllocateDSV()
+	{
+		D3D12_GPU_DESCRIPTOR_HANDLE NewHandle = DSVGPUStart;
+		DSVGPUStart.ptr += RTVDescriptorSize;
 		return NewHandle;
 	}
 };
