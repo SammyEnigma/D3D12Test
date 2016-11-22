@@ -39,9 +39,8 @@ static FStagingManager GStagingManager;
 
 static FVertexBuffer GObjVB;
 static Obj::FObj GObj;
-#if ENABLE_VULKAN
-static FVertexBuffer GFloorVB;
-static FIndexBuffer GFloorIB;
+static FRWVertexBuffer GFloorVB;
+static FRWIndexBuffer GFloorIB;
 struct FCreateFloorUB
 {
 	float Y;
@@ -51,7 +50,6 @@ struct FCreateFloorUB
 	float Elevation;
 };
 static FUniformBuffer<FCreateFloorUB> GCreateFloorUB;
-#endif
 struct FViewUB
 {
 	FMatrix4x4 View;
@@ -327,19 +325,33 @@ struct FTestPostComputePSO : public FComputePSO
 	}
 };
 FTestPostComputePSO GTestComputePostPSO;
-
+#endif
 struct FSetupFloorPSO : public FComputePSO
 {
-	virtual void SetupLayoutBindings(std::vector<VkDescriptorSetLayoutBinding>& OutBindings) override
+	virtual void SetupLayoutBindings(std::vector<D3D12_ROOT_PARAMETER>& OutRootParameters, std::vector<D3D12_DESCRIPTOR_RANGE>& OutRanges) override
 	{
+		AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_UAV);
+		AddRange(OutRanges, 1, D3D12_DESCRIPTOR_RANGE_TYPE_UAV);
+		AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_CBV);
+		//AddRange(OutRanges, 1, D3D12_DESCRIPTOR_RANGE_TYPE_CBV);
+		//AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_SRV);
+		//AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER);
+
+		AddRootParam(OutRootParameters, OutRanges, 0, D3D12_SHADER_VISIBILITY_ALL);
+		AddRootParam(OutRootParameters, OutRanges, 1, D3D12_SHADER_VISIBILITY_ALL);
+		AddRootParam(OutRootParameters, OutRanges, 2, D3D12_SHADER_VISIBILITY_ALL);
+		//AddRootParam(OutRootParameters, OutRanges, 1, D3D12_SHADER_VISIBILITY_VERTEX);
+		//AddRootParam(OutRootParameters, OutRanges, 2, D3D12_SHADER_VISIBILITY_PIXEL);
+		//AddRootParam(OutRootParameters, OutRanges, 3, D3D12_SHADER_VISIBILITY_PIXEL);
+#if ENABLE_VULKAN
 		AddBinding(OutBindings, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 		AddBinding(OutBindings, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 		AddBinding(OutBindings, 2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 		AddBinding(OutBindings, 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+#endif
 	}
 };
 static FSetupFloorPSO GSetupFloorPSO;
-#endif
 
 void FInstance::CreateDevice(FDevice& OutDevice)
 {
@@ -380,8 +392,8 @@ struct FObjectCache
 
 #if ENABLE_VULKAN
 	std::map<uint64, FRenderPass*> RenderPasses;
-	std::map<FComputePSO*, FComputePipeline*> ComputePipelines;
 #endif
+	std::map<FComputePSO*, FComputePipeline*> ComputePipelines;
 	std::map<FGfxPSOLayout, FGfxPipeline*> GfxPipelines;
 
 #if ENABLE_VULKAN
@@ -454,7 +466,6 @@ struct FObjectCache
 		return NewPipeline;
 	}
 
-#if ENABLE_VULKAN
 	FComputePipeline* GetOrCreateComputePipeline(FComputePSO* ComputePSO)
 	{
 		auto Found = ComputePipelines.find(ComputePSO);
@@ -464,11 +475,12 @@ struct FObjectCache
 		}
 
 		auto* NewPipeline = new FComputePipeline;
-		NewPipeline->Create(Device->Device, ComputePSO);
+		NewPipeline->Create(Device, ComputePSO);
 		ComputePipelines[ComputePSO] = NewPipeline;
 		return NewPipeline;
 	}
 
+#if ENABLE_VULKAN
 	FRenderPass* GetOrCreateRenderPass(uint32 Width, uint32 Height, uint32 NumColorTargets, VkFormat* ColorFormats, VkFormat DepthStencilFormat = VK_FORMAT_UNDEFINED, VkSampleCountFlagBits InNumSamples = VK_SAMPLE_COUNT_1_BIT, FImage2DWithView* ResolveColorBuffer = nullptr)
 	{
 		FRenderPassLayout Layout(Width, Height, NumColorTargets, ColorFormats, DepthStencilFormat, InNumSamples, ResolveColorBuffer ? ResolveColorBuffer->GetFormat() : VK_FORMAT_UNDEFINED);
@@ -608,11 +620,11 @@ static bool LoadShadersAndGeometry()
 	{
 #endif
 		check(GTestPSO.CreateVSPS(GDevice, "../Shaders/TestVS.hlsl", "../Shaders/TestPS.hlsl"));
+		check(GSetupFloorPSO.Create(GDevice, "../Shaders/CreateFloor.hlsl"));
 #if ENABLE_VULKAN
 		check(GTestComputePSO.Create(GDevice.Device, "../Shaders/Test0.comp.spv"));
 		check(GTestComputePostPSO.Create(GDevice.Device, "../Shaders/TestPost.comp.spv"));
 		check(GFillTexturePSO.Create(GDevice.Device, "../Shaders/FillTexture.comp.spv"));
-		check(GSetupFloorPSO.Create(GDevice.Device, "../Shaders/CreateFloor.comp.spv"));
 	}
 #endif
 
@@ -717,16 +729,24 @@ ResourceBarrier(CmdBuffer, &GCheckerboardTexture.Image, D3D12_RESOURCE_STATE_COP
 }
 
 
-#if ENABLE_VULKAN
 static void FillFloor(FCmdBuffer* CmdBuffer)
 {
+#if ENABLE_VULKAN
 	BufferBarrier(CmdBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, &GFloorVB.Buffer, 0, VK_ACCESS_SHADER_WRITE_BIT);
 	BufferBarrier(CmdBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, &GFloorIB.Buffer, 0, VK_ACCESS_SHADER_WRITE_BIT);
+#endif
 	auto* ComputePipeline = GObjectCache.GetOrCreateComputePipeline(&GSetupFloorPSO);
-	vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, ComputePipeline->Pipeline);
-
+	CmdBuffer->CommandList->SetPipelineState(ComputePipeline->PipelineState.Get());
 	FCreateFloorUB& CreateFloorUB = *GCreateFloorUB.GetMappedData();
+	CmdBuffer->CommandList->SetComputeRootSignature(GSetupFloorPSO.RootSignature.Get());
 
+	ID3D12DescriptorHeap* ppHeaps[] = {GDescriptorPool.CSUHeap.Get()};
+	CmdBuffer->CommandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
+	CmdBuffer->CommandList->SetComputeRootDescriptorTable(0, GFloorIB.GPUHandle);
+	CmdBuffer->CommandList->SetComputeRootDescriptorTable(1, GFloorVB.GPUHandle);
+	CmdBuffer->CommandList->SetComputeRootDescriptorTable(2, GCreateFloorUB.GPUHandle);
+
+#if ENABLE_VULKAN
 	{
 		auto DescriptorSet = GDescriptorPool.AllocateDescriptorSet(GSetupFloorPSO.DSLayout);
 
@@ -739,9 +759,12 @@ static void FillFloor(FCmdBuffer* CmdBuffer)
 		vkCmdBindDescriptorSets(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, ComputePipeline->PipelineLayout, 0, 1, &DescriptorSet, 0, nullptr);
 	}
 
-	vkCmdDispatch(CmdBuffer->CmdBuffer, CreateFloorUB.NumQuadsX, 1, CreateFloorUB.NumQuadsZ);
+#endif
+	CmdBuffer->CommandList->Dispatch(CreateFloorUB.NumQuadsX, 1, CreateFloorUB.NumQuadsZ);
+#if ENABLE_VULKAN
 	BufferBarrier(CmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, &GFloorIB.Buffer, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT);
 	BufferBarrier(CmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, &GFloorVB.Buffer, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT);
+#endif
 }
 
 static void SetupFloor()
@@ -763,7 +786,7 @@ static void SetupFloor()
 	uint32 NumQuadsX = 128;
 	uint32 NumQuadsZ = 128;
 	float Elevation = 40;
-	GCreateFloorUB.Create(GDevice.Device, &GMemMgr);
+	GCreateFloorUB.Create(GDevice, GDescriptorPool, GMemMgr, true);
 	{
 		FCreateFloorUB& CreateFloorUB = *GCreateFloorUB.GetMappedData();
 		CreateFloorUB.Y = 10;
@@ -772,16 +795,14 @@ static void SetupFloor()
 		CreateFloorUB.NumQuadsZ = NumQuadsZ;
 		CreateFloorUB.Elevation = Elevation;
 	}
-
-	GFloorVB.Create(GDevice.Device, sizeof(FPosColorUVVertex) * 4 * NumQuadsX * NumQuadsZ, &GMemMgr, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-
-	GFloorIB.Create(GDevice.Device, 3 * 2 * (NumQuadsX - 1) * (NumQuadsZ - 1), VK_INDEX_TYPE_UINT32, &GMemMgr, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+	GFloorVB.Create(GDevice, GDescriptorPool, sizeof(FPosColorUVVertex), sizeof(FPosColorUVVertex) * 4 * NumQuadsX * NumQuadsZ, GMemMgr, true);
+	GFloorIB.Create(GDevice, GDescriptorPool, true, 3 * 2 * (NumQuadsX - 1) * (NumQuadsZ - 1), GMemMgr, true);
 	{
-		auto* CmdBuffer = GCmdBufferMgr.AllocateCmdBuffer();
+		auto* CmdBuffer = GCmdBufferMgr.AllocateCmdBuffer(GDevice);
 		CmdBuffer->Begin();
 		FillFloor(CmdBuffer);
 		CmdBuffer->End();
-		GCmdBufferMgr.Submit(CmdBuffer, GDevice.PresentQueue, nullptr, nullptr);
+		GCmdBufferMgr.Submit(GDevice, CmdBuffer);
 		CmdBuffer->WaitForFence();
 	}
 /*
@@ -796,7 +817,6 @@ static void SetupFloor()
 	};
 	MapAndFillBufferSyncOneShotCmdBuffer(&GFloorIB.Buffer, FillIndices, sizeof(uint32) * 4);*/
 }
-#endif
 
 bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 {
@@ -848,9 +868,7 @@ bool DoInit(HINSTANCE hInstance, HWND hWnd, uint32& Width, uint32& Height)
 	CreateAndFillTexture();
 
 	GSampler.Create(GDevice, GDescriptorPool);
-#if ENABLE_VULKAN
 	SetupFloor();
-#endif
 
 #if TRY_MULTITHREADED
 	GThread.Create();
@@ -893,9 +911,9 @@ static void DrawCube(/*FGfxPipeline* GfxPipeline, */FDevice* Device, FCmdBuffer*
 	CmdBuffer->CommandList->DrawInstanced((uint32)GObj.Faces.size() * 3, 1, 0, 0);
 }
 
-#if ENABLE_VULKAN
-static void DrawFloor(FGfxPipeline* GfxPipeline, VkDevice Device, FCmdBuffer* CmdBuffer)
+static void DrawFloor(/*FGfxPipeline* GfxPipeline, */FDevice* Device, FCmdBuffer* CmdBuffer)
 {
+#if ENABLE_VULKAN
 	auto DescriptorSet = GDescriptorPool.AllocateDescriptorSet(GTestPSO.DSLayout);
 
 	FWriteDescriptors WriteDescriptors;
@@ -906,11 +924,13 @@ static void DrawFloor(FGfxPipeline* GfxPipeline, VkDevice Device, FCmdBuffer* Cm
 
 	vkCmdBindDescriptorSets(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, GfxPipeline->PipelineLayout, 0, 1, &DescriptorSet, 0, nullptr);
 
-	CmdBind(CmdBuffer, &GFloorVB);
-	CmdBind(CmdBuffer, &GFloorIB);
 	vkCmdDrawIndexed(CmdBuffer->CmdBuffer, GFloorIB.NumIndices, 1, 0, 0, 0);
-}
 #endif
+	CmdBind(CmdBuffer, &GFloorVB.VB);
+	CmdBind(CmdBuffer, &GFloorIB.IB);
+	CmdBuffer->CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	CmdBuffer->CommandList->DrawInstanced(GFloorIB.IB.NumIndices, 1, 0, 0);
+}
 
 static void SetDynamicStates(FCmdBuffer* CmdBuffer, uint32 Width, uint32 Height)
 {
@@ -947,9 +967,7 @@ static void InternalRenderFrame(FDevice* Device, /*FRenderPass* RenderPass, */FC
 	CmdBind(CmdBuffer, GfxPipeline);
 
 	SetDynamicStates(CmdBuffer, Width, Height);
-#if ENABLE_VULKAN
-	DrawFloor(GfxPipeline, Device, CmdBuffer);
-#endif
+	DrawFloor(/*GfxPipeline, */Device, CmdBuffer);
 	DrawCube(/*GfxPipeline, */Device, CmdBuffer);
 }
 
@@ -957,9 +975,8 @@ static void RenderFrame(FDevice* Device, FCmdBuffer* CmdBuffer, FImage2DWithView
 {
 	UpdateCamera();
 
-#if ENABLE_VULKAN
 	FillFloor(CmdBuffer);
-
+#if ENABLE_VULKAN
 	VkFormat ColorFormat = ColorBuffer->GetFormat();
 	auto* RenderPass = GObjectCache.GetOrCreateRenderPass(ColorBuffer->GetWidth(), ColorBuffer->GetHeight(), 1, &ColorFormat, DepthBuffer->GetFormat(), ColorBuffer->Image.Samples, ResolveColorBuffer);
 	auto* Framebuffer = GObjectCache.GetOrCreateFramebuffer(RenderPass->RenderPass, ColorBuffer->GetImageView(), DepthBuffer->GetImageView(), ColorBuffer->GetWidth(), ColorBuffer->GetHeight(), ResolveColorBuffer ? ResolveColorBuffer->GetImageView() : VK_NULL_HANDLE);
@@ -1195,14 +1212,10 @@ void DoDeinit()
 #endif
 #endif
 	GQuitting = true;
-#if ENABLE_VULKAN
 	GFloorIB.Destroy();
 	GFloorVB.Destroy();
-#endif
 	GViewUB.Destroy();
-#if ENABLE_VULKAN
 	GCreateFloorUB.Destroy();
-#endif
 	GObjUB.Destroy();
 	GObjVB.Destroy();
 	GIdentityUB.Destroy();

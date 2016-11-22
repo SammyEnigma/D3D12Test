@@ -35,19 +35,20 @@ struct FBuffer
 	uint64 Size = 0;
 };
 
-#if ENABLE_VULKAN
 struct FIndexBuffer
 {
-	void Create(VkDevice InDevice, uint32 InNumIndices, VkIndexType InIndexType, FMemManager* MemMgr,
-		VkBufferUsageFlags InUsageFlags = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-		VkMemoryPropertyFlags MemPropertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+	uint32 NumIndices = 0;
+	bool b32Bits = false;
+
+	void Create(FDevice& InDevice, bool bIn32Bits, uint32 InNumIndices, FMemManager& MemMgr, bool bUploadCPU)
 	{
-		VkBufferUsageFlags UsageFlags = InUsageFlags | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-		check(InIndexType == VK_INDEX_TYPE_UINT16 || InIndexType == VK_INDEX_TYPE_UINT32);
-		IndexType = InIndexType;
+		b32Bits = bIn32Bits;
 		NumIndices = InNumIndices;
-		uint32 IndexSize = InIndexType == VK_INDEX_TYPE_UINT16 ? 2 : 4;
-		Buffer.Create(InDevice, InNumIndices * IndexSize, UsageFlags, MemPropertyFlags, MemMgr);
+		uint32 Size = NumIndices * (b32Bits ? 4 : 2);
+		Buffer.Create(InDevice, Size, MemMgr, bUploadCPU);
+		View.BufferLocation = Buffer.Alloc->Resource->GetGPUVirtualAddress();
+		View.SizeInBytes = Size;
+		View.Format = b32Bits ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT;
 	}
 
 	void Destroy()
@@ -56,15 +57,29 @@ struct FIndexBuffer
 	}
 
 	FBuffer Buffer;
-	uint32 NumIndices = 0;
-	VkIndexType IndexType = VK_INDEX_TYPE_UINT32;
+
+	D3D12_INDEX_BUFFER_VIEW View;
 };
 
 inline void CmdBind(FCmdBuffer* CmdBuffer, FIndexBuffer* IB)
 {
-	vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, IB->Buffer.Buffer, IB->Buffer.GetBindOffset(), IB->IndexType);
+	CmdBuffer->CommandList->IASetIndexBuffer(&IB->View);
 }
-#endif
+
+struct FRWIndexBuffer
+{
+	void Create(FDevice& InDevice, struct FDescriptorPool& Pool, bool bIn32Bits, uint32 InNumIndices, FMemManager& MemMgr, bool bUploadCPU);
+
+	void Destroy()
+	{
+		IB.Destroy();
+	}
+
+	FIndexBuffer IB;
+
+	D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle = {0};
+};
+
 struct FVertexBuffer
 {
 	void Create(FDevice& InDevice, uint32 Stride, uint32 Size, FMemManager& MemMgr, bool bUploadCPU)
@@ -89,6 +104,18 @@ inline void CmdBind(FCmdBuffer* CmdBuffer, FVertexBuffer* VB)
 {
 	CmdBuffer->CommandList->IASetVertexBuffers(0, 1, &VB->View);
 }
+
+struct FRWVertexBuffer
+{
+	void Create(FDevice& InDevice, struct FDescriptorPool& Pool, uint32 Stride, uint32 Size, FMemManager& MemMgr, bool bUploadCPU);
+	void Destroy()
+	{
+		VB.Destroy();
+	}
+
+	FVertexBuffer VB;
+	D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle = {0};
+};
 
 template <typename TStruct>
 struct FUniformBuffer
@@ -503,28 +530,6 @@ struct FGfxPSO : public FPSO
 		Range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 		OutRanges.push_back(Range);
 	}
-#if ENABLE_VULKAN
-	virtual void SetupShaderStages(std::vector<VkPipelineShaderStageCreateInfo>& OutShaderStages)
-	{
-		VkPipelineShaderStageCreateInfo Info;
-		MemZero(Info);
-		Info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		Info.stage = VK_SHADER_STAGE_VERTEX_BIT;
-		Info.module = VS.ShaderModule;
-		Info.pName = "main";
-		OutShaderStages.push_back(Info);
-
-		if (PS.ShaderModule != VK_NULL_HANDLE)
-		{
-			MemZero(Info);
-			Info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-			Info.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-			Info.module = PS.ShaderModule;
-			Info.pName = "main";
-			OutShaderStages.push_back(Info);
-		}
-	}
-#endif
 };
 
 struct FVertexFormat
@@ -619,20 +624,19 @@ protected:
 	bool bWireframe;
 };
 
-#if ENABLE_VULKAN
 struct FComputePSO : public FPSO
 {
 	FShader CS;
 
-	virtual void Destroy(VkDevice Device) override
+	virtual void Destroy() override
 	{
-		FPSO::Destroy(Device);
-		CS.Destroy(Device);
+		FPSO::Destroy();
+		CS.Destroy();
 	}
 
-	bool Create(VkDevice Device, const char* CSFilename)
+	bool Create(FDevice& Device, const char* CSFilename)
 	{
-		if (!CS.Create(CSFilename, Device))
+		if (!CS.Create(CSFilename, Device, "cs_5_0"))
 		{
 			return false;
 		}
@@ -641,29 +645,32 @@ struct FComputePSO : public FPSO
 		return true;
 	}
 
-	inline void AddBinding(std::vector<VkDescriptorSetLayoutBinding>& OutBindings, int32 Binding, VkDescriptorType DescType, uint32 NumDescriptors = 1)
+	inline void AddRootParam(std::vector<D3D12_ROOT_PARAMETER>& OutRootParameters, std::vector<D3D12_DESCRIPTOR_RANGE>& Ranges, int32 Binding, D3D12_SHADER_VISIBILITY Stage)
 	{
-		VkDescriptorSetLayoutBinding NewBinding;
-		MemZero(NewBinding);
-		NewBinding.binding = Binding;
-		NewBinding.descriptorType = DescType;
-		NewBinding.descriptorCount = NumDescriptors;
-		NewBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-		OutBindings.push_back(NewBinding);
+		D3D12_ROOT_PARAMETER RootParam;
+		MemZero(RootParam);
+		RootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+		RootParam.ShaderVisibility = Stage;
+		RootParam.DescriptorTable.NumDescriptorRanges = 1;
+		RootParam.DescriptorTable.pDescriptorRanges = &Ranges[Binding];
+		OutRootParameters.push_back(RootParam);
 	}
 
-	virtual void SetupShaderStages(std::vector<VkPipelineShaderStageCreateInfo>& OutShaderStages)
+	inline void AddRange(std::vector<D3D12_DESCRIPTOR_RANGE>& OutRanges, int32 Binding, D3D12_DESCRIPTOR_RANGE_TYPE RangeType)
 	{
-		VkPipelineShaderStageCreateInfo Info;
-		MemZero(Info);
-		Info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		Info.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-		Info.module = CS.ShaderModule;
-		Info.pName = "main";
-		OutShaderStages.push_back(Info);
+		auto RangeIndex = OutRanges.size();
+		D3D12_DESCRIPTOR_RANGE Range;
+		MemZero(Range);
+		Range.RangeType = RangeType;
+		Range.NumDescriptors = 1;
+		Range.BaseShaderRegister = Binding;
+		Range.RegisterSpace = 0;
+		//Range.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC;
+		Range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+		OutRanges.push_back(Range);
 	}
 };
-#endif
+
 struct FBasePipeline
 {
 	Microsoft::WRL::ComPtr<ID3D12PipelineState> PipelineState;
@@ -954,14 +961,23 @@ struct FGfxPipeline : public FBasePipeline
 #endif
 	);
 
-	D3D12_GRAPHICS_PIPELINE_STATE_DESC Desc = {};
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC Desc = {0};
 };
 
-#if ENABLE_VULKAN
 struct FComputePipeline : public FBasePipeline
 {
-	void Create(VkDevice Device, FComputePSO* PSO)
+	D3D12_COMPUTE_PIPELINE_STATE_DESC Desc ={0};
+
+	void Create(FDevice* Device, FComputePSO* PSO)
 	{
+		Desc.pRootSignature = PSO->RootSignature.Get();
+
+		Desc.CS.pShaderBytecode = PSO->CS.UCode->GetBufferPointer();
+		Desc.CS.BytecodeLength = PSO->CS.UCode->GetBufferSize();
+
+		checkD3D12(Device->Device->CreateComputePipelineState(&Desc, IID_PPV_ARGS(&PipelineState)));
+
+#if ENABLE_VULKAN
 		std::vector<VkPipelineShaderStageCreateInfo> ShaderStages;
 		PSO->SetupShaderStages(ShaderStages);
 		check(ShaderStages.size() == 1);
@@ -982,9 +998,11 @@ struct FComputePipeline : public FBasePipeline
 		//VkPipeline                         basePipelineHandle;
 		//int32_t                            basePipelineIndex;
 		checkVk(vkCreateComputePipelines(Device, VK_NULL_HANDLE, 1, &PipelineInfo, nullptr, &Pipeline));
+#endif
 	}
 };
 
+#if ENABLE_VULKAN
 class FWriteDescriptors
 {
 public:
@@ -1362,5 +1380,18 @@ inline void FUniformBuffer<TStruct>::Create(FDevice& InDevice, FDescriptorPool& 
 	D3D12_CPU_DESCRIPTOR_HANDLE Handle = Pool.CPUAllocateCSU();
 	InDevice.Device->CreateConstantBufferView(&View, Handle);
 
+	GPUHandle = Pool.GPUAllocateCSU();
+}
+
+inline void FRWIndexBuffer::Create(FDevice& InDevice, FDescriptorPool& Pool, bool bIn32Bits, uint32 InNumIndices, FMemManager& MemMgr, bool bUploadCPU)
+{
+	IB.Create(InDevice, bIn32Bits, InNumIndices, MemMgr, bUploadCPU);
+
+	GPUHandle = Pool.GPUAllocateCSU();
+}
+
+inline void FRWVertexBuffer::Create(FDevice& InDevice, FDescriptorPool& Pool, uint32 Stride, uint32 Size, FMemManager& MemMgr, bool bUploadCPU)
+{
+	VB.Create(InDevice, Stride, Size, MemMgr, bUploadCPU);
 	GPUHandle = Pool.GPUAllocateCSU();
 }
