@@ -310,7 +310,7 @@ struct FMemManager
 			&Heap,
 			D3D12_HEAP_FLAG_NONE,
 			&Desc,
-			IsDepthOrStencilFormat(Format) ? D3D12_RESOURCE_STATE_DEPTH_WRITE : D3D12_RESOURCE_STATE_COPY_DEST,
+			IsDepthOrStencilFormat(Format) ? D3D12_RESOURCE_STATE_DEPTH_WRITE : D3D12_RESOURCE_STATE_COMMON,
 			IsDepthOrStencilFormat(Format) ? &ClearValue : nullptr,
 			IID_PPV_ARGS(&NewResource->Resource)));
 		ResourceAllocations.push_back(NewResource);
