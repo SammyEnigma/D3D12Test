@@ -926,6 +926,14 @@ static void DrawFloor(/*FGfxPipeline* GfxPipeline, */FDevice* Device, FCmdBuffer
 
 	vkCmdDrawIndexed(CmdBuffer->CmdBuffer, GFloorIB.NumIndices, 1, 0, 0, 0);
 #endif
+	ID3D12DescriptorHeap* ppHeaps[] ={GDescriptorPool.CSUHeap.Get(), GDescriptorPool.SamplerHeap.Get()};
+	CmdBuffer->CommandList->SetGraphicsRootSignature(GTestPSO.RootSignature.Get());
+	CmdBuffer->CommandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
+	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(0, GViewUB.GPUHandle);
+	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(1, GObjUB.GPUHandle);
+	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(2, GCheckerboardTexture.ImageView.GPUHandle);
+	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(3, GSampler.GPUHandle);
+
 	CmdBind(CmdBuffer, &GFloorVB.VB);
 	CmdBind(CmdBuffer, &GFloorIB.IB);
 	CmdBuffer->CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
