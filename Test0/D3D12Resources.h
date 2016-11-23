@@ -6,11 +6,11 @@
 
 struct FBuffer
 {
-	void Create(FDevice& InDevice, uint64 InSize, FMemManager& MemMgr, bool bUploadCPU)
+	void Create(FDevice& InDevice, uint64 InSize, FMemManager& MemMgr, D3D12_RESOURCE_STATES ResourceStates, D3D12_RESOURCE_FLAGS ResourceFlags, bool bUploadCPU)
 	{
 		Size = InSize;
 
-		Alloc = MemMgr.AllocBuffer(InDevice, InSize, bUploadCPU);
+		Alloc = MemMgr.AllocBuffer(InDevice, InSize, ResourceStates, ResourceFlags, bUploadCPU);
 	}
 
 	void Destroy()
@@ -40,12 +40,12 @@ struct FIndexBuffer
 	uint32 NumIndices = 0;
 	bool b32Bits = false;
 
-	void Create(FDevice& InDevice, bool bIn32Bits, uint32 InNumIndices, FMemManager& MemMgr, bool bUploadCPU)
+	void Create(FDevice& InDevice, bool bIn32Bits, uint32 InNumIndices, FMemManager& MemMgr, D3D12_RESOURCE_STATES ResourceStates, bool bUploadCPU, D3D12_RESOURCE_FLAGS ResourceFlags = D3D12_RESOURCE_FLAG_NONE)
 	{
 		b32Bits = bIn32Bits;
 		NumIndices = InNumIndices;
 		uint32 Size = NumIndices * (b32Bits ? 4 : 2);
-		Buffer.Create(InDevice, Size, MemMgr, bUploadCPU);
+		Buffer.Create(InDevice, Size, MemMgr, ResourceStates, ResourceFlags, bUploadCPU);
 		View.BufferLocation = Buffer.Alloc->Resource->GetGPUVirtualAddress();
 		View.SizeInBytes = Size;
 		View.Format = b32Bits ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT;
@@ -82,9 +82,9 @@ struct FRWIndexBuffer
 
 struct FVertexBuffer
 {
-	void Create(FDevice& InDevice, uint32 Stride, uint32 Size, FMemManager& MemMgr, bool bUploadCPU)
+	void Create(FDevice& InDevice, uint32 Stride, uint32 Size, FMemManager& MemMgr, D3D12_RESOURCE_STATES ResourceStates, bool bUploadCPU, D3D12_RESOURCE_FLAGS ResourceFlags = D3D12_RESOURCE_FLAG_NONE)
 	{
-		Buffer.Create(InDevice, Size, MemMgr, bUploadCPU);
+		Buffer.Create(InDevice, Size, MemMgr, ResourceStates, ResourceFlags, bUploadCPU);
 		View.BufferLocation = Buffer.Alloc->Resource->GetGPUVirtualAddress();
 		View.StrideInBytes = Stride;
 		View.SizeInBytes = Size;
@@ -263,7 +263,7 @@ struct FStagingManager
 		}
 
 		auto* Buffer = new FStagingBuffer;
-		Buffer->Create(InDevice, Size, MemMgr, true);
+		Buffer->Create(InDevice, Size, MemMgr, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_FLAG_NONE, true);
 		FEntry Entry;
 		Entry.Buffer = Buffer;
 		Entry.bFree = false;
@@ -1129,27 +1129,6 @@ inline void ResourceBarrier(FCmdBuffer* CmdBuffer, FImage* Image, D3D12_RESOURCE
 	ResourceBarrier(CmdBuffer, Image->Alloc->Resource.Get(), Src, Dest);
 }
 
-#if ENABLE_VULKAN
-inline void BufferBarrier(FCmdBuffer* CmdBuffer, VkPipelineStageFlags SrcStage, VkPipelineStageFlags DestStage, VkBuffer Buffer, VkDeviceSize Offset, VkDeviceSize Size, VkAccessFlags SrcMask, VkAccessFlags DstMask)
-{
-	VkBufferMemoryBarrier Barrier;
-	MemZero(Barrier);
-	Barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-	Barrier.srcAccessMask = SrcMask;
-	Barrier.dstAccessMask = DstMask;
-	Barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	Barrier.buffer = Buffer;
-	Barrier.offset = Offset;
-	Barrier.size = Size;
-	vkCmdPipelineBarrier(CmdBuffer->CmdBuffer, SrcStage, DestStage, 0, 0, nullptr, 1, &Barrier, 0, nullptr);
-}
-
-inline void BufferBarrier(FCmdBuffer* CmdBuffer, VkPipelineStageFlags SrcStage, VkPipelineStageFlags DestStage, FBuffer* Buffer, VkAccessFlags SrcMask, VkAccessFlags DstMask)
-{
-	BufferBarrier(CmdBuffer, SrcStage, DestStage, Buffer->Buffer, Buffer->GetBindOffset(), Buffer->GetSize(), SrcMask, DstMask);
-}
-#endif
 struct FSwapchain
 {
 	Microsoft::WRL::ComPtr<IDXGISwapChain3> Swapchain;
@@ -1371,7 +1350,7 @@ template <typename TStruct>
 inline void FUniformBuffer<TStruct>::Create(FDevice& InDevice, FDescriptorPool& Pool, FMemManager& MemMgr, bool bUploadCPU)
 {
 	uint32 Size = (sizeof(TStruct) + 255) & ~255;
-	Buffer.Create(InDevice, Size, MemMgr, bUploadCPU);
+	Buffer.Create(InDevice, Size, MemMgr, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, D3D12_RESOURCE_FLAG_NONE, bUploadCPU);
 
 	MemZero(View);
 	View.BufferLocation = Buffer.Alloc->Resource->GetGPUVirtualAddress();
@@ -1385,13 +1364,13 @@ inline void FUniformBuffer<TStruct>::Create(FDevice& InDevice, FDescriptorPool& 
 
 inline void FRWIndexBuffer::Create(FDevice& InDevice, FDescriptorPool& Pool, bool bIn32Bits, uint32 InNumIndices, FMemManager& MemMgr, bool bUploadCPU)
 {
-	IB.Create(InDevice, bIn32Bits, InNumIndices, MemMgr, bUploadCPU);
+	IB.Create(InDevice, bIn32Bits, InNumIndices, MemMgr, D3D12_RESOURCE_STATE_INDEX_BUFFER, bUploadCPU, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
 
 	GPUHandle = Pool.GPUAllocateCSU();
 }
 
 inline void FRWVertexBuffer::Create(FDevice& InDevice, FDescriptorPool& Pool, uint32 Stride, uint32 Size, FMemManager& MemMgr, bool bUploadCPU)
 {
-	VB.Create(InDevice, Stride, Size, MemMgr, bUploadCPU);
+	VB.Create(InDevice, Stride, Size, MemMgr, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, bUploadCPU, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
 	GPUHandle = Pool.GPUAllocateCSU();
 }

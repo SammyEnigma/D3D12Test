@@ -640,7 +640,7 @@ static bool LoadShadersAndGeometry()
 		return false;
 	}
 
-	GObjVB.Create(GDevice, sizeof(FPosColorUVVertex), sizeof(FPosColorUVVertex) * (uint32)GObj.Faces.size() * 3, GMemMgr, true);
+	GObjVB.Create(GDevice, sizeof(FPosColorUVVertex), sizeof(FPosColorUVVertex) * (uint32)GObj.Faces.size() * 3, GMemMgr, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, true);
 	//GObj.Faces.resize(1);
 
 	auto FillObj = [](void* Data)
@@ -731,10 +731,8 @@ ResourceBarrier(CmdBuffer, &GCheckerboardTexture.Image, D3D12_RESOURCE_STATE_COP
 
 static void FillFloor(FCmdBuffer* CmdBuffer)
 {
-#if ENABLE_VULKAN
-	BufferBarrier(CmdBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, &GFloorVB.Buffer, 0, VK_ACCESS_SHADER_WRITE_BIT);
-	BufferBarrier(CmdBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, &GFloorIB.Buffer, 0, VK_ACCESS_SHADER_WRITE_BIT);
-#endif
+	ResourceBarrier(CmdBuffer, GFloorVB.VB.Buffer.Alloc->Resource.Get(), D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+	ResourceBarrier(CmdBuffer, GFloorIB.IB.Buffer.Alloc->Resource.Get(), D3D12_RESOURCE_STATE_INDEX_BUFFER, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 	auto* ComputePipeline = GObjectCache.GetOrCreateComputePipeline(&GSetupFloorPSO);
 	CmdBuffer->CommandList->SetPipelineState(ComputePipeline->PipelineState.Get());
 	FCreateFloorUB& CreateFloorUB = *GCreateFloorUB.GetMappedData();
@@ -761,10 +759,20 @@ static void FillFloor(FCmdBuffer* CmdBuffer)
 
 #endif
 	CmdBuffer->CommandList->Dispatch(CreateFloorUB.NumQuadsX, 1, CreateFloorUB.NumQuadsZ);
-#if ENABLE_VULKAN
-	BufferBarrier(CmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, &GFloorIB.Buffer, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT);
-	BufferBarrier(CmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, &GFloorVB.Buffer, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT);
-#endif
+
+	{
+		D3D12_RESOURCE_BARRIER Barriers[2];
+		MemZero(Barriers);
+		Barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+		Barriers[0].Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+		Barriers[0].UAV.pResource = GFloorVB.VB.Buffer.Alloc->Resource.Get();
+		Barriers[1] = Barriers[0];
+		Barriers[1].UAV.pResource = GFloorIB.IB.Buffer.Alloc->Resource.Get();
+		CmdBuffer->CommandList->ResourceBarrier(2, Barriers);
+	}
+
+	ResourceBarrier(CmdBuffer, GFloorVB.VB.Buffer.Alloc->Resource.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+	ResourceBarrier(CmdBuffer, GFloorIB.IB.Buffer.Alloc->Resource.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_INDEX_BUFFER);
 }
 
 static void SetupFloor()
@@ -795,8 +803,8 @@ static void SetupFloor()
 		CreateFloorUB.NumQuadsZ = NumQuadsZ;
 		CreateFloorUB.Elevation = Elevation;
 	}
-	GFloorVB.Create(GDevice, GDescriptorPool, sizeof(FPosColorUVVertex), sizeof(FPosColorUVVertex) * 4 * NumQuadsX * NumQuadsZ, GMemMgr, true);
-	GFloorIB.Create(GDevice, GDescriptorPool, true, 3 * 2 * (NumQuadsX - 1) * (NumQuadsZ - 1), GMemMgr, true);
+	GFloorVB.Create(GDevice, GDescriptorPool, sizeof(FPosColorUVVertex), sizeof(FPosColorUVVertex) * 4 * NumQuadsX * NumQuadsZ, GMemMgr, false);
+	GFloorIB.Create(GDevice, GDescriptorPool, true, 3 * 2 * (NumQuadsX - 1) * (NumQuadsZ - 1), GMemMgr, false);
 	{
 		auto* CmdBuffer = GCmdBufferMgr.AllocateCmdBuffer(GDevice);
 		CmdBuffer->Begin();
@@ -926,7 +934,7 @@ static void DrawFloor(/*FGfxPipeline* GfxPipeline, */FDevice* Device, FCmdBuffer
 
 	vkCmdDrawIndexed(CmdBuffer->CmdBuffer, GFloorIB.NumIndices, 1, 0, 0, 0);
 #endif
-	ID3D12DescriptorHeap* ppHeaps[] ={GDescriptorPool.CSUHeap.Get(), GDescriptorPool.SamplerHeap.Get()};
+	ID3D12DescriptorHeap* ppHeaps[] = {GDescriptorPool.CSUHeap.Get(), GDescriptorPool.SamplerHeap.Get()};
 	CmdBuffer->CommandList->SetGraphicsRootSignature(GTestPSO.RootSignature.Get());
 	CmdBuffer->CommandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
 	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(0, GViewUB.GPUHandle);
@@ -934,10 +942,10 @@ static void DrawFloor(/*FGfxPipeline* GfxPipeline, */FDevice* Device, FCmdBuffer
 	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(2, GCheckerboardTexture.ImageView.GPUHandle);
 	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(3, GSampler.GPUHandle);
 
+	CmdBuffer->CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	CmdBind(CmdBuffer, &GFloorVB.VB);
 	CmdBind(CmdBuffer, &GFloorIB.IB);
-	CmdBuffer->CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	CmdBuffer->CommandList->DrawInstanced(GFloorIB.IB.NumIndices, 1, 0, 0);
+	CmdBuffer->CommandList->DrawIndexedInstanced(GFloorIB.IB.NumIndices, 1, 0, 0, 0);
 }
 
 static void SetDynamicStates(FCmdBuffer* CmdBuffer, uint32 Width, uint32 Height)

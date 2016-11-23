@@ -235,7 +235,7 @@ struct FMemManager
 	std::list<FBufferAllocation*> BufferAllocations;
 	std::list<FResourceAllocation*> ResourceAllocations;
 
-	FBufferAllocation* AllocBuffer(FDevice& InDevice, uint64 InSize, bool bUploadCPU)
+	FBufferAllocation* AllocBuffer(FDevice& InDevice, uint64 InSize, D3D12_RESOURCE_STATES ResourceStates, D3D12_RESOURCE_FLAGS ResourceFlags, bool bUploadCPU)
 	{
 		auto* NewBuffer = new FBufferAllocation;
 
@@ -249,6 +249,7 @@ struct FMemManager
 		Desc.Format = DXGI_FORMAT_UNKNOWN;
 		Desc.SampleDesc.Count = 1;
 		Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+		Desc.Flags = ResourceFlags;
 
 		D3D12_HEAP_PROPERTIES Heap;
 		MemZero(Heap);
@@ -262,7 +263,7 @@ struct FMemManager
 			&Heap,
 			D3D12_HEAP_FLAG_NONE,
 			&Desc,
-			D3D12_RESOURCE_STATE_GENERIC_READ,
+			(D3D12_RESOURCE_STATES)(ResourceStates | (bUploadCPU ? D3D12_RESOURCE_STATE_GENERIC_READ : 0)),
 			nullptr,
 			IID_PPV_ARGS(&NewBuffer->Resource)));
 		if (bUploadCPU)
