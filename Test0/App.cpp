@@ -328,16 +328,17 @@ struct FSetupFloorPSO : public FComputePSO
 {
 	virtual void SetupLayoutBindings(std::vector<D3D12_ROOT_PARAMETER>& OutRootParameters, std::vector<D3D12_DESCRIPTOR_RANGE>& OutRanges) override
 	{
-		AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_UAV);
+		uint32 StartUAV = AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_UAV);
 		AddRange(OutRanges, 1, D3D12_DESCRIPTOR_RANGE_TYPE_UAV);
-		AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_CBV);
+		//AddRange(OutRanges, 2, D3D12_DESCRIPTOR_RANGE_TYPE_CBV);
 		//AddRange(OutRanges, 1, D3D12_DESCRIPTOR_RANGE_TYPE_CBV);
 		//AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_SRV);
 		//AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER);
 
-		AddRootParam(OutRootParameters, OutRanges, 0, D3D12_SHADER_VISIBILITY_ALL);
-		AddRootParam(OutRootParameters, OutRanges, 1, D3D12_SHADER_VISIBILITY_ALL);
-		AddRootParam(OutRootParameters, OutRanges, 2, D3D12_SHADER_VISIBILITY_ALL);
+		AddRootCBVParam(OutRootParameters, 0, D3D12_SHADER_VISIBILITY_ALL);
+		AddRootTableParam(OutRootParameters, OutRanges, StartUAV, 2, D3D12_SHADER_VISIBILITY_ALL);
+		//AddRootParam(OutRootParameters, OutRanges, 1, D3D12_SHADER_VISIBILITY_ALL);
+		//AddRootParam(OutRootParameters, OutRanges, 2, D3D12_SHADER_VISIBILITY_ALL);
 		//AddRootParam(OutRootParameters, OutRanges, 1, D3D12_SHADER_VISIBILITY_VERTEX);
 		//AddRootParam(OutRootParameters, OutRanges, 2, D3D12_SHADER_VISIBILITY_PIXEL);
 		//AddRootParam(OutRootParameters, OutRanges, 3, D3D12_SHADER_VISIBILITY_PIXEL);
@@ -729,7 +730,6 @@ ResourceBarrier(CmdBuffer, &GCheckerboardTexture.Image, D3D12_RESOURCE_STATE_COP
 
 static void FillFloor(FCmdBuffer* CmdBuffer)
 {
-return;
 	ResourceBarrier(CmdBuffer, GFloorVB.VB.Buffer.Alloc->Resource.Get(), D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 	ResourceBarrier(CmdBuffer, GFloorIB.IB.Buffer.Alloc->Resource.Get(), D3D12_RESOURCE_STATE_INDEX_BUFFER, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 	auto* ComputePipeline = GObjectCache.GetOrCreateComputePipeline(&GSetupFloorPSO);
@@ -737,14 +737,14 @@ return;
 	FCreateFloorUB& CreateFloorUB = *GCreateFloorUB.GetMappedData();
 	CmdBuffer->CommandList->SetComputeRootSignature(GSetupFloorPSO.RootSignature.Get());
 
-	check(0);
-#if 0
 	ID3D12DescriptorHeap* ppHeaps[] = {GDescriptorPool.CSUHeap.Get()};
 	CmdBuffer->CommandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
-	CmdBuffer->CommandList->SetComputeRootDescriptorTable(0, GFloorIB);
-	CmdBuffer->CommandList->SetComputeRootDescriptorTable(1, GFloorVB);
-	CmdBuffer->CommandList->SetComputeRootDescriptorTable(2, GCreateFloorUB.GPUHandle);
-#endif
+	CmdBuffer->CommandList->SetComputeRootConstantBufferView(0, GCreateFloorUB.View.BufferLocation);
+	FDescriptorHandle IBHandle = GDescriptorPool.AllocateCSU();
+	FDescriptorHandle VBHandle = GDescriptorPool.AllocateCSU();
+	GDevice.Device->CreateUnorderedAccessView(GFloorIB.IB.Buffer.Alloc->Resource.Get(), nullptr, &GFloorIB.View, IBHandle.CPU);
+	GDevice.Device->CreateUnorderedAccessView(GFloorVB.VB.Buffer.Alloc->Resource.Get(), nullptr, &GFloorVB.View, VBHandle.CPU);
+	CmdBuffer->CommandList->SetComputeRootDescriptorTable(1, IBHandle.GPU);	// Setting IB and then VB as they are contiguous
 
 #if ENABLE_VULKAN
 	{
@@ -913,8 +913,8 @@ static void DrawCube(/*FGfxPipeline* GfxPipeline, */FDevice* Device, FCmdBuffer*
 	CmdBuffer->CommandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
 	CmdBuffer->CommandList->SetGraphicsRootConstantBufferView(0, GViewUB.View.BufferLocation);
 	CmdBuffer->CommandList->SetGraphicsRootConstantBufferView(1, GObjUB.View.BufferLocation);
-	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(2, GCheckerboardTexture.ImageView.GPUHandle);
-	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(3, GSampler.GPUHandle);
+	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(2, GCheckerboardTexture.ImageView.Handle.GPU);
+	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(3, GSampler.Handle.GPU);
 
 	CmdBuffer->CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	CmdBind(CmdBuffer, &GObjVB);
@@ -941,8 +941,8 @@ static void DrawFloor(/*FGfxPipeline* GfxPipeline, */FDevice* Device, FCmdBuffer
 	CmdBuffer->CommandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
 	CmdBuffer->CommandList->SetGraphicsRootConstantBufferView(0, GViewUB.View.BufferLocation);
 	CmdBuffer->CommandList->SetGraphicsRootConstantBufferView(1, GObjUB.View.BufferLocation);
-	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(2, GCheckerboardTexture.ImageView.GPUHandle);
-	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(3, GSampler.GPUHandle);
+	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(2, GCheckerboardTexture.ImageView.Handle.GPU);
+	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(3, GSampler.Handle.GPU);
 
 	CmdBuffer->CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	CmdBind(CmdBuffer, &GFloorVB.VB);
@@ -1001,7 +1001,7 @@ static void RenderFrame(FDevice* Device, FCmdBuffer* CmdBuffer, FImage2DWithView
 
 	CmdBuffer->BeginRenderPass(RenderPass->RenderPass, *Framebuffer, TRY_MULTITHREADED == 1);
 #endif
-	CmdBuffer->CommandList->OMSetRenderTargets(1, &GSwapchain.GetAcquiredImageView(), false, &DepthBuffer->ImageView.CPUHandle);
+	CmdBuffer->CommandList->OMSetRenderTargets(1, &GSwapchain.GetAcquiredImageView(), false, &DepthBuffer->ImageView.Handle.CPU);
 #if TRY_MULTITHREADED == 1
 	{
 		GThread.ParentCmdBuffer = CmdBuffer;
@@ -1122,7 +1122,7 @@ void DoRender()
 	VkFormat ColorFormat = (VkFormat)GSwapchain.BACKBUFFER_VIEW_FORMAT;
 #endif
 	auto* DepthBuffer = GRenderTargetPool.Acquire(&GDevice, "DepthBuffer", GSwapchain.GetWidth(), GSwapchain.GetHeight(), DXGI_FORMAT_D32_FLOAT, GMemMgr);// VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 1, SceneColor->Texture.Image.Samples);
-	CmdBuffer->CommandList->ClearDepthStencilView(DepthBuffer->Texture.ImageView.CPUHandle, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
+	CmdBuffer->CommandList->ClearDepthStencilView(DepthBuffer->Texture.ImageView.Handle.CPU, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
 #if ENABLE_VULKAN
 	DepthBuffer->DoTransition(CmdBuffer, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 

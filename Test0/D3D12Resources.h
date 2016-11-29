@@ -4,6 +4,12 @@
 #include "D3D12Device.h"
 #include "D3D12Mem.h"
 
+struct FDescriptorHandle
+{
+	D3D12_CPU_DESCRIPTOR_HANDLE CPU = {0};
+	D3D12_GPU_DESCRIPTOR_HANDLE GPU = {0};
+};
+
 struct FBuffer
 {
 	void Create(FDevice& InDevice, uint64 InSize, FMemManager& MemMgr, D3D12_RESOURCE_STATES ResourceStates, D3D12_RESOURCE_FLAGS ResourceFlags, bool bUploadCPU)
@@ -71,6 +77,11 @@ struct FRWIndexBuffer
 	void Create(FDevice& InDevice, struct FDescriptorPool& Pool, bool bIn32Bits, uint32 InNumIndices, FMemManager& MemMgr, bool bUploadCPU)
 	{
 		IB.Create(InDevice, bIn32Bits, InNumIndices, MemMgr, D3D12_RESOURCE_STATE_INDEX_BUFFER, bUploadCPU, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+		MemZero(View);
+		View.Format =  DXGI_FORMAT_UNKNOWN;
+		View.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+		View.Buffer.NumElements = IB.NumIndices;
+		View.Buffer.StructureByteStride = IB.b32Bits ? 4 : 2;
 	}
 
 	void Destroy()
@@ -79,6 +90,7 @@ struct FRWIndexBuffer
 	}
 
 	FIndexBuffer IB;
+	D3D12_UNORDERED_ACCESS_VIEW_DESC View;
 };
 
 struct FVertexBuffer
@@ -111,6 +123,11 @@ struct FRWVertexBuffer
 	void Create(FDevice& InDevice, struct FDescriptorPool& Pool, uint32 Stride, uint32 Size, FMemManager& MemMgr, bool bUploadCPU)
 	{
 		VB.Create(InDevice, Stride, Size, MemMgr, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, bUploadCPU, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+		MemZero(View);
+		View.Format =  DXGI_FORMAT_UNKNOWN;
+		View.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+		View.Buffer.NumElements = Size / Stride;
+		View.Buffer.StructureByteStride = Stride;
 	}
 
 	void Destroy()
@@ -119,6 +136,7 @@ struct FRWVertexBuffer
 	}
 
 	FVertexBuffer VB;
+	D3D12_UNORDERED_ACCESS_VIEW_DESC View;
 };
 
 template <typename TStruct>
@@ -137,7 +155,7 @@ struct FUniformBuffer
 	}
 
 	D3D12_CONSTANT_BUFFER_VIEW_DESC View;
-	D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle = {0};
+	FDescriptorHandle Handle;
 	FBuffer Buffer;
 };
 
@@ -200,9 +218,8 @@ struct FImage
 
 struct FImageView
 {
-	D3D12_CPU_DESCRIPTOR_HANDLE CPUHandle = {0};
-	D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle ={0};
 	DXGI_FORMAT Format = DXGI_FORMAT_UNKNOWN;
+	FDescriptorHandle Handle;
 
 	void Create(FDevice& InDevice, FImage& Image, DXGI_FORMAT InFormat, FDescriptorPool& Pool);
 
@@ -384,8 +401,7 @@ struct FImage2DWithView
 
 struct FSampler
 {
-	D3D12_CPU_DESCRIPTOR_HANDLE CPUHandle = {0};
-	D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle ={0};
+	FDescriptorHandle Handle;
 	void Create(FDevice& InDevice, FDescriptorPool& Pool);
 
 	void Destroy()
@@ -457,6 +473,68 @@ struct FPSO
 #endif
 	}
 
+
+	static inline void AddRootTableParam(std::vector<D3D12_ROOT_PARAMETER>& OutRootParameters, std::vector<D3D12_DESCRIPTOR_RANGE>& Ranges, int32 StartRange, int32 NumRanges, D3D12_SHADER_VISIBILITY Stage)
+	{
+		D3D12_ROOT_PARAMETER RootParam;
+		MemZero(RootParam);
+		RootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+		RootParam.ShaderVisibility = Stage;
+		RootParam.DescriptorTable.NumDescriptorRanges = NumRanges;
+		RootParam.DescriptorTable.pDescriptorRanges = &Ranges[StartRange];
+		OutRootParameters.push_back(RootParam);
+	}
+
+	static inline void AddRootSRVParam(std::vector<D3D12_ROOT_PARAMETER>& OutRootParameters, int32 Binding, D3D12_SHADER_VISIBILITY Stage)
+	{
+		D3D12_ROOT_PARAMETER RootParam;
+		MemZero(RootParam);
+		RootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+		RootParam.ShaderVisibility = Stage;
+		RootParam.Descriptor.RegisterSpace = 0;
+		RootParam.Descriptor.ShaderRegister = Binding;
+		OutRootParameters.push_back(RootParam);
+	}
+
+	static inline void AddRootUAVParam(std::vector<D3D12_ROOT_PARAMETER>& OutRootParameters, int32 Binding, D3D12_SHADER_VISIBILITY Stage)
+	{
+		D3D12_ROOT_PARAMETER RootParam;
+		MemZero(RootParam);
+		RootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
+		RootParam.ShaderVisibility = Stage;
+		RootParam.Descriptor.RegisterSpace = 0;
+		RootParam.Descriptor.ShaderRegister = Binding;
+		OutRootParameters.push_back(RootParam);
+	}
+
+	static inline void AddRootCBVParam(std::vector<D3D12_ROOT_PARAMETER>& OutRootParameters, int32 Binding, D3D12_SHADER_VISIBILITY Stage)
+	{
+		D3D12_ROOT_PARAMETER RootParam;
+		MemZero(RootParam);
+		RootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+		RootParam.ShaderVisibility = Stage;
+		RootParam.Descriptor.RegisterSpace = 0;
+		RootParam.Descriptor.ShaderRegister = Binding;
+		OutRootParameters.push_back(RootParam);
+	}
+
+	static inline uint32 AddRange(std::vector<D3D12_DESCRIPTOR_RANGE>& OutRanges, int32 Binding, D3D12_DESCRIPTOR_RANGE_TYPE RangeType)
+	{
+		uint32 RangeIndex = (uint32)OutRanges.size();
+
+		D3D12_DESCRIPTOR_RANGE Range;
+		MemZero(Range);
+		Range.RangeType = RangeType;
+		Range.NumDescriptors = 1;
+		Range.BaseShaderRegister = Binding;
+		Range.RegisterSpace = 0;
+		//Range.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC;
+		Range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+		OutRanges.push_back(Range);
+		return RangeIndex;
+	}
+
 	void CreateDescriptorSetLayout(FDevice& Device)
 	{
 		std::vector<D3D12_ROOT_PARAMETER> RootParameters;
@@ -508,67 +586,6 @@ struct FGfxPSO : public FPSO
 
 		CreateDescriptorSetLayout(Device);
 		return true;
-	}
-
-	inline void AddRootTableParam(std::vector<D3D12_ROOT_PARAMETER>& OutRootParameters, std::vector<D3D12_DESCRIPTOR_RANGE>& Ranges, int32 StartRange, int32 NumRanges, D3D12_SHADER_VISIBILITY Stage)
-	{
-		D3D12_ROOT_PARAMETER RootParam;
-		MemZero(RootParam);
-		RootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-		RootParam.ShaderVisibility = Stage;
-		RootParam.DescriptorTable.NumDescriptorRanges = NumRanges;
-		RootParam.DescriptorTable.pDescriptorRanges = &Ranges[StartRange];
-		OutRootParameters.push_back(RootParam);
-	}
-
-	inline void AddRootSRVParam(std::vector<D3D12_ROOT_PARAMETER>& OutRootParameters, int32 Binding, D3D12_SHADER_VISIBILITY Stage)
-	{
-		D3D12_ROOT_PARAMETER RootParam;
-		MemZero(RootParam);
-		RootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
-		RootParam.ShaderVisibility = Stage;
-		RootParam.Descriptor.RegisterSpace = 0;
-		RootParam.Descriptor.ShaderRegister = Binding;
-		OutRootParameters.push_back(RootParam);
-	}
-
-	inline void AddRootUAVParam(std::vector<D3D12_ROOT_PARAMETER>& OutRootParameters, int32 Binding, D3D12_SHADER_VISIBILITY Stage)
-	{
-		D3D12_ROOT_PARAMETER RootParam;
-		MemZero(RootParam);
-		RootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
-		RootParam.ShaderVisibility = Stage;
-		RootParam.Descriptor.RegisterSpace = 0;
-		RootParam.Descriptor.ShaderRegister = Binding;
-		OutRootParameters.push_back(RootParam);
-	}
-
-	inline void AddRootCBVParam(std::vector<D3D12_ROOT_PARAMETER>& OutRootParameters, int32 Binding, D3D12_SHADER_VISIBILITY Stage)
-	{
-		D3D12_ROOT_PARAMETER RootParam;
-		MemZero(RootParam);
-		RootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-		RootParam.ShaderVisibility = Stage;
-		RootParam.Descriptor.RegisterSpace = 0;
-		RootParam.Descriptor.ShaderRegister = Binding;
-		OutRootParameters.push_back(RootParam);
-	}
-
-	inline uint32 AddRange(std::vector<D3D12_DESCRIPTOR_RANGE>& OutRanges, int32 Binding, D3D12_DESCRIPTOR_RANGE_TYPE RangeType)
-	{
-		uint32 RangeIndex = (uint32)OutRanges.size();
-
-		D3D12_DESCRIPTOR_RANGE Range;
-		MemZero(Range);
-		Range.RangeType = RangeType;
-		Range.NumDescriptors = 1;
-		Range.BaseShaderRegister = Binding;
-		Range.RegisterSpace = 0;
-		//Range.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC;
-		Range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-
-		OutRanges.push_back(Range);
-		return RangeIndex;
 	}
 };
 
@@ -684,31 +701,6 @@ struct FComputePSO : public FPSO
 		CreateDescriptorSetLayout(Device);
 		return true;
 	}
-
-	inline void AddRootParam(std::vector<D3D12_ROOT_PARAMETER>& OutRootParameters, std::vector<D3D12_DESCRIPTOR_RANGE>& Ranges, int32 Binding, D3D12_SHADER_VISIBILITY Stage)
-	{
-		D3D12_ROOT_PARAMETER RootParam;
-		MemZero(RootParam);
-		RootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-		RootParam.ShaderVisibility = Stage;
-		RootParam.DescriptorTable.NumDescriptorRanges = 1;
-		RootParam.DescriptorTable.pDescriptorRanges = &Ranges[Binding];
-		OutRootParameters.push_back(RootParam);
-	}
-
-	inline void AddRange(std::vector<D3D12_DESCRIPTOR_RANGE>& OutRanges, int32 Binding, D3D12_DESCRIPTOR_RANGE_TYPE RangeType)
-	{
-		auto RangeIndex = OutRanges.size();
-		D3D12_DESCRIPTOR_RANGE Range;
-		MemZero(Range);
-		Range.RangeType = RangeType;
-		Range.NumDescriptors = 1;
-		Range.BaseShaderRegister = Binding;
-		Range.RegisterSpace = 0;
-		//Range.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC;
-		Range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-		OutRanges.push_back(Range);
-	}
 };
 
 struct FBasePipeline
@@ -815,6 +807,38 @@ struct FDescriptorPool
 	{
 	}
 #endif
+
+	FDescriptorHandle AllocateRTV()
+	{
+		FDescriptorHandle Handle;
+		Handle.CPU = CPUAllocateRTV();
+		Handle.GPU = GPUAllocateRTV();
+		return Handle;
+	}
+
+	FDescriptorHandle AllocateCSU()
+	{
+		FDescriptorHandle Handle;
+		Handle.CPU = CPUAllocateCSU();
+		Handle.GPU = GPUAllocateCSU();
+		return Handle;
+	}
+
+	FDescriptorHandle AllocateSampler()
+	{
+		FDescriptorHandle Handle;
+		Handle.CPU = CPUAllocateSampler();
+		Handle.GPU = GPUAllocateSampler();
+		return Handle;
+	}
+
+	FDescriptorHandle AllocateDSV()
+	{
+		FDescriptorHandle Handle;
+		Handle.CPU = CPUAllocateDSV();
+		Handle.GPU = GPUAllocateDSV();
+		return Handle;
+	}
 
 	D3D12_CPU_DESCRIPTOR_HANDLE CPUAllocateRTV()
 	{
@@ -1396,8 +1420,6 @@ inline void FUniformBuffer<TStruct>::Create(FDevice& InDevice, FDescriptorPool& 
 	View.BufferLocation = Buffer.Alloc->Resource->GetGPUVirtualAddress();
 	View.SizeInBytes = Size;
 
-	D3D12_CPU_DESCRIPTOR_HANDLE Handle = Pool.CPUAllocateCSU();
-	InDevice.Device->CreateConstantBufferView(&View, Handle);
-
-	GPUHandle = Pool.GPUAllocateCSU();
+	Handle = Pool.AllocateCSU();
+	InDevice.Device->CreateConstantBufferView(&View, Handle.CPU);
 }

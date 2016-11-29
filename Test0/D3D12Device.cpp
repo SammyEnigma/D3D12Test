@@ -503,9 +503,8 @@ void FImageView::Create(FDevice& InDevice, FImage& Image, DXGI_FORMAT InFormat, 
 		Desc.Format = InFormat;
 		Desc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
 		//Desc.Flags = ;
-		CPUHandle = Pool.CPUAllocateDSV();
-		InDevice.Device->CreateDepthStencilView(Image.Alloc->Resource.Get(), &Desc, CPUHandle);
-		GPUHandle = Pool.GPUAllocateCSU();
+		Handle = Pool.AllocateDSV();
+		InDevice.Device->CreateDepthStencilView(Image.Alloc->Resource.Get(), &Desc, Handle.CPU);
 	}
 	else
 	{
@@ -515,8 +514,8 @@ void FImageView::Create(FDevice& InDevice, FImage& Image, DXGI_FORMAT InFormat, 
 		Desc.Format = InFormat;
 		Desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
 		Desc.Texture2D.MipLevels = 1;
-		CPUHandle = Pool.CPUAllocateCSU();
-		InDevice.Device->CreateShaderResourceView(Image.Alloc->Resource.Get(), &Desc, CPUHandle);
+		Handle = Pool.AllocateCSU();
+		InDevice.Device->CreateShaderResourceView(Image.Alloc->Resource.Get(), &Desc, Handle.CPU);
 
 #if ENABLE_VULKAN
 		Format = InFormat;
@@ -536,7 +535,6 @@ void FImageView::Create(FDevice& InDevice, FImage& Image, DXGI_FORMAT InFormat, 
 		Info.subresourceRange.layerCount = 1;
 		checkVk(vkCreateImageView(Device, &Info, nullptr, &ImageView));
 #endif
-		GPUHandle = Pool.GPUAllocateCSU();
 	}
 }
 
@@ -553,7 +551,6 @@ void FSampler::Create(FDevice& InDevice, FDescriptorPool& Pool)
 	Desc.MinLOD = 0.0f;
 	Desc.MaxLOD = D3D12_FLOAT32_MAX;
 	Desc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-	CPUHandle = Pool.CPUAllocateSampler();
-	InDevice.Device->CreateSampler(&Desc, CPUHandle);
-	GPUHandle = Pool.GPUAllocateSampler();
+	Handle = Pool.AllocateSampler();
+	InDevice.Device->CreateSampler(&Desc, Handle.CPU);
 }

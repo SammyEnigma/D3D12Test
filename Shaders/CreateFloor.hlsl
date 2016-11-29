@@ -83,8 +83,8 @@ struct FPosColorUVVertex
 	float u, v;
 };
 
-RWBuffer<int> OutIndices;
-RWStructuredBuffer<FPosColorUVVertex> OutVertices;
+RWBuffer<int> OutIndices : register(u0);
+RWStructuredBuffer<FPosColorUVVertex> OutVertices : register(u1);
 
 cbuffer UB
 {
@@ -119,25 +119,20 @@ void Main(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
 float Height = 1;//texture(Heightmap, vec2(U, V)).x;
 		float CurrentY = Y + Elevation * Height;
 
-		OutVertices[QuadIndex].x = 1;//X;
-		OutVertices[QuadIndex].y = 1;//CurrentY;
-		OutVertices[QuadIndex].z = 1;//Z;
+		OutVertices[QuadIndex].x = X;
+		OutVertices[QuadIndex].y = CurrentY;
+		OutVertices[QuadIndex].z = Z;
 		OutVertices[QuadIndex].Color = QuadIndexX * 65536 + QuadIndexZ;
 		OutVertices[QuadIndex].u = U;
 		OutVertices[QuadIndex].v = V;
 		if (QuadIndexX != 0 && QuadIndexZ != 0)
 		{
-			OutIndices[(QuadIndexX - 1 + NumQuadsX * (QuadIndexZ - 1)) * 6 + 0] = 0;//NumQuadsX * QuadIndexZ + QuadIndexX;
-			OutIndices[(QuadIndexX - 1 + NumQuadsX * (QuadIndexZ - 1)) * 6 + 1] = 1;//NumQuadsX * QuadIndexZ + QuadIndexX - 1;
-			OutIndices[(QuadIndexX - 1 + NumQuadsX * (QuadIndexZ - 1)) * 6 + 2] = 2;//NumQuadsX * (QuadIndexZ - 1 ) + QuadIndexX - 1;
-			OutIndices[(QuadIndexX - 1 + NumQuadsX * (QuadIndexZ - 1)) * 6 + 3] = 3;//NumQuadsX * (QuadIndexZ - 1 ) + QuadIndexX - 1;
-			OutIndices[(QuadIndexX - 1 + NumQuadsX * (QuadIndexZ - 1)) * 6 + 4] = 4;//NumQuadsX * (QuadIndexZ - 1) + QuadIndexX;
-			OutIndices[(QuadIndexX - 1 + NumQuadsX * (QuadIndexZ - 1)) * 6 + 5] = 5;//NumQuadsX * QuadIndexZ + QuadIndexX;
+			OutIndices[(QuadIndexX - 1 + NumQuadsX * (QuadIndexZ - 1)) * 6 + 0] = NumQuadsX * QuadIndexZ + QuadIndexX;
+			OutIndices[(QuadIndexX - 1 + NumQuadsX * (QuadIndexZ - 1)) * 6 + 1] = NumQuadsX * QuadIndexZ + QuadIndexX - 1;
+			OutIndices[(QuadIndexX - 1 + NumQuadsX * (QuadIndexZ - 1)) * 6 + 2] = NumQuadsX * (QuadIndexZ - 1 ) + QuadIndexX - 1;
+			OutIndices[(QuadIndexX - 1 + NumQuadsX * (QuadIndexZ - 1)) * 6 + 3] = NumQuadsX * (QuadIndexZ - 1 ) + QuadIndexX - 1;
+			OutIndices[(QuadIndexX - 1 + NumQuadsX * (QuadIndexZ - 1)) * 6 + 4] = NumQuadsX * (QuadIndexZ - 1) + QuadIndexX;
+			OutIndices[(QuadIndexX - 1 + NumQuadsX * (QuadIndexZ - 1)) * 6 + 5] = NumQuadsX * QuadIndexZ + QuadIndexX;
 		}
 	}
-	
-	OutIndices[0] = -1;
-	OutIndices[1] = 1;
-	OutIndices[2] = 2;
-	OutIndices[3] = 3;
 }
