@@ -330,18 +330,13 @@ struct FSetupFloorPSO : public FComputePSO
 	{
 		uint32 StartUAV = AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_UAV);
 		AddRange(OutRanges, 1, D3D12_DESCRIPTOR_RANGE_TYPE_UAV);
-		//AddRange(OutRanges, 2, D3D12_DESCRIPTOR_RANGE_TYPE_CBV);
-		//AddRange(OutRanges, 1, D3D12_DESCRIPTOR_RANGE_TYPE_CBV);
-		//AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_SRV);
-		//AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER);
+		AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_SRV);
+		uint32 StartSampler = AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER);
 
 		AddRootCBVParam(OutRootParameters, 0, D3D12_SHADER_VISIBILITY_ALL);
-		AddRootTableParam(OutRootParameters, OutRanges, StartUAV, 2, D3D12_SHADER_VISIBILITY_ALL);
-		//AddRootParam(OutRootParameters, OutRanges, 1, D3D12_SHADER_VISIBILITY_ALL);
-		//AddRootParam(OutRootParameters, OutRanges, 2, D3D12_SHADER_VISIBILITY_ALL);
-		//AddRootParam(OutRootParameters, OutRanges, 1, D3D12_SHADER_VISIBILITY_VERTEX);
-		//AddRootParam(OutRootParameters, OutRanges, 2, D3D12_SHADER_VISIBILITY_PIXEL);
-		//AddRootParam(OutRootParameters, OutRanges, 3, D3D12_SHADER_VISIBILITY_PIXEL);
+		AddRootTableParam(OutRootParameters, OutRanges, StartUAV, 3, D3D12_SHADER_VISIBILITY_ALL);
+		AddRootTableParam(OutRootParameters, OutRanges, StartSampler, 1, D3D12_SHADER_VISIBILITY_ALL);
+
 #if ENABLE_VULKAN
 		AddBinding(OutBindings, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 		AddBinding(OutBindings, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
@@ -737,14 +732,17 @@ static void FillFloor(FCmdBuffer* CmdBuffer)
 	FCreateFloorUB& CreateFloorUB = *GCreateFloorUB.GetMappedData();
 	CmdBuffer->CommandList->SetComputeRootSignature(GSetupFloorPSO.RootSignature.Get());
 
-	ID3D12DescriptorHeap* ppHeaps[] = {GDescriptorPool.CSUHeap.Get()};
+	ID3D12DescriptorHeap* ppHeaps[] = {GDescriptorPool.CSUHeap.Get(), GDescriptorPool.SamplerHeap.Get()};
 	CmdBuffer->CommandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
 	CmdBuffer->CommandList->SetComputeRootConstantBufferView(0, GCreateFloorUB.View.BufferLocation);
 	FDescriptorHandle IBHandle = GDescriptorPool.AllocateCSU();
 	FDescriptorHandle VBHandle = GDescriptorPool.AllocateCSU();
+	FDescriptorHandle HeightmapHandle = GDescriptorPool.AllocateCSU();
 	GDevice.Device->CreateUnorderedAccessView(GFloorIB.IB.Buffer.Alloc->Resource.Get(), nullptr, &GFloorIB.View, IBHandle.CPU);
 	GDevice.Device->CreateUnorderedAccessView(GFloorVB.VB.Buffer.Alloc->Resource.Get(), nullptr, &GFloorVB.View, VBHandle.CPU);
+	GDevice.Device->CreateShaderResourceView(GCheckerboardTexture.Image.Alloc->Resource.Get(), &GCheckerboardTexture.SRVView, HeightmapHandle.CPU);
 	CmdBuffer->CommandList->SetComputeRootDescriptorTable(1, IBHandle.GPU);	// Setting IB and then VB as they are contiguous
+	CmdBuffer->CommandList->SetComputeRootDescriptorTable(2, GSampler.Handle.GPU);
 
 	CmdBuffer->CommandList->Dispatch(CreateFloorUB.NumQuadsX, 1, CreateFloorUB.NumQuadsZ);
 
@@ -979,7 +977,7 @@ static void RenderFrame(FDevice* Device, FCmdBuffer* CmdBuffer, FImage2DWithView
 {
 	UpdateCamera();
 
-	//FillFloor(CmdBuffer);
+	FillFloor(CmdBuffer);
 #if ENABLE_VULKAN
 	VkFormat ColorFormat = ColorBuffer->GetFormat();
 	auto* RenderPass = GObjectCache.GetOrCreateRenderPass(ColorBuffer->GetWidth(), ColorBuffer->GetHeight(), 1, &ColorFormat, DepthBuffer->GetFormat(), ColorBuffer->Image.Samples, ResolveColorBuffer);

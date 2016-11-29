@@ -95,6 +95,8 @@ cbuffer UB
 	float Elevation;
 };
 
+Texture2D Heightmap : register(t0);
+SamplerState SS : register(s0);
 
 [numthreads(1,1,1)]
 void Main(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
@@ -116,7 +118,7 @@ void Main(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
 		float VWidth = 1.0 / float(NumQuadsZ);
 		float V = VWidth * float(QuadIndexZ);
 
-float Height = 1;//texture(Heightmap, vec2(U, V)).x;
+		float Height = Heightmap.SampleLevel(SS, float2(U, V), 0).x;
 		float CurrentY = Y + Elevation * Height;
 
 		OutVertices[QuadIndex].x = X;

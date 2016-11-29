@@ -359,6 +359,12 @@ struct FImage2DWithView
 		);
 
 		ImageView.Create(InDevice, Image, Format, Pool);
+
+		MemZero(SRVView);
+		SRVView.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+		SRVView.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		SRVView.Format = Format;
+		SRVView.Texture2D.MipLevels = 1;
 	}
 
 	void Destroy()
@@ -397,6 +403,8 @@ struct FImage2DWithView
 	{
 		return Image.Height;
 	}
+
+	D3D12_SHADER_RESOURCE_VIEW_DESC SRVView;
 };
 
 struct FSampler
@@ -518,7 +526,7 @@ struct FPSO
 		OutRootParameters.push_back(RootParam);
 	}
 
-	static inline uint32 AddRange(std::vector<D3D12_DESCRIPTOR_RANGE>& OutRanges, int32 Binding, D3D12_DESCRIPTOR_RANGE_TYPE RangeType)
+	static inline uint32 AddRange(std::vector<D3D12_DESCRIPTOR_RANGE>& OutRanges, int32 Register, D3D12_DESCRIPTOR_RANGE_TYPE RangeType)
 	{
 		uint32 RangeIndex = (uint32)OutRanges.size();
 
@@ -526,7 +534,7 @@ struct FPSO
 		MemZero(Range);
 		Range.RangeType = RangeType;
 		Range.NumDescriptors = 1;
-		Range.BaseShaderRegister = Binding;
+		Range.BaseShaderRegister = Register;
 		Range.RegisterSpace = 0;
 		//Range.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC;
 		Range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
