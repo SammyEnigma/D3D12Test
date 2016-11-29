@@ -746,20 +746,6 @@ static void FillFloor(FCmdBuffer* CmdBuffer)
 	GDevice.Device->CreateUnorderedAccessView(GFloorVB.VB.Buffer.Alloc->Resource.Get(), nullptr, &GFloorVB.View, VBHandle.CPU);
 	CmdBuffer->CommandList->SetComputeRootDescriptorTable(1, IBHandle.GPU);	// Setting IB and then VB as they are contiguous
 
-#if ENABLE_VULKAN
-	{
-		auto DescriptorSet = GDescriptorPool.AllocateDescriptorSet(GSetupFloorPSO.DSLayout);
-
-		FWriteDescriptors WriteDescriptors;
-		WriteDescriptors.AddStorageBuffer(DescriptorSet, 0, GFloorIB.Buffer);
-		WriteDescriptors.AddStorageBuffer(DescriptorSet, 1, GFloorVB.Buffer);
-		WriteDescriptors.AddUniformBuffer(DescriptorSet, 2, GCreateFloorUB);
-		WriteDescriptors.AddCombinedImageSampler(DescriptorSet, 3, GSampler, GHeightMap.ImageView);
-		vkUpdateDescriptorSets(GDevice.Device, (uint32)WriteDescriptors.DSWrites.size(), &WriteDescriptors.DSWrites[0], 0, nullptr);
-		vkCmdBindDescriptorSets(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, ComputePipeline->PipelineLayout, 0, 1, &DescriptorSet, 0, nullptr);
-	}
-
-#endif
 	CmdBuffer->CommandList->Dispatch(CreateFloorUB.NumQuadsX, 1, CreateFloorUB.NumQuadsZ);
 
 	{
@@ -940,7 +926,7 @@ static void DrawFloor(/*FGfxPipeline* GfxPipeline, */FDevice* Device, FCmdBuffer
 	CmdBuffer->CommandList->SetGraphicsRootSignature(GTestPSO.RootSignature.Get());
 	CmdBuffer->CommandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
 	CmdBuffer->CommandList->SetGraphicsRootConstantBufferView(0, GViewUB.View.BufferLocation);
-	CmdBuffer->CommandList->SetGraphicsRootConstantBufferView(1, GObjUB.View.BufferLocation);
+	CmdBuffer->CommandList->SetGraphicsRootConstantBufferView(1, GIdentityUB.View.BufferLocation);
 	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(2, GCheckerboardTexture.ImageView.Handle.GPU);
 	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(3, GSampler.Handle.GPU);
 
@@ -985,7 +971,7 @@ static void InternalRenderFrame(FDevice* Device, /*FRenderPass* RenderPass, */FC
 	CmdBind(CmdBuffer, GfxPipeline);
 
 	SetDynamicStates(CmdBuffer, Width, Height);
-//DrawFloor(/*GfxPipeline, */Device, CmdBuffer);
+	DrawFloor(/*GfxPipeline, */Device, CmdBuffer);
 	DrawCube(/*GfxPipeline, */Device, CmdBuffer);
 }
 
@@ -993,7 +979,7 @@ static void RenderFrame(FDevice* Device, FCmdBuffer* CmdBuffer, FImage2DWithView
 {
 	UpdateCamera();
 
-	FillFloor(CmdBuffer);
+	//FillFloor(CmdBuffer);
 #if ENABLE_VULKAN
 	VkFormat ColorFormat = ColorBuffer->GetFormat();
 	auto* RenderPass = GObjectCache.GetOrCreateRenderPass(ColorBuffer->GetWidth(), ColorBuffer->GetHeight(), 1, &ColorFormat, DepthBuffer->GetFormat(), ColorBuffer->Image.Samples, ResolveColorBuffer);
