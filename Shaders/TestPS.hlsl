@@ -5,8 +5,9 @@ struct FVSOut
 	float4 Color : COLOR;
 };
 
-Texture2D Texture;
-SamplerState Sampler;
+SamplerState Sampler : register(s0);
+
+Texture2D Texture : register(t0);
 
 float4 Main(FVSOut In) : SV_Target0
 {

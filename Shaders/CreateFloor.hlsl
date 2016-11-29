@@ -137,4 +137,7 @@ float Height = 1;//texture(Heightmap, vec2(U, V)).x;
 	}
 	
 	OutIndices[0] = -1;
+	OutIndices[1] = 1;
+	OutIndices[2] = 2;
+	OutIndices[3] = 3;
 }

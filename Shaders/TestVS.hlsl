@@ -7,14 +7,14 @@ struct FVSOut
 
 #define USE_VIEW_UB	1
 #if USE_VIEW_UB
-cbuffer ViewUB
+cbuffer ViewUB : register(b0)
 {
 	float4x4 View;
 	float4x4 Proj;
 };
 #endif
 
-cbuffer ObjUB
+cbuffer ObjUB : register(b1)
 {
 	float4x4 Obj;
 };

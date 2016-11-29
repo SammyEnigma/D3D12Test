@@ -283,15 +283,13 @@ struct FTestPSO : public FGfxPSO
 {
 	virtual void SetupLayoutBindings(std::vector<D3D12_ROOT_PARAMETER>& OutRootParameters, std::vector<D3D12_DESCRIPTOR_RANGE>& OutRanges) override
 	{
-		AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_CBV);
-		AddRange(OutRanges, 1, D3D12_DESCRIPTOR_RANGE_TYPE_CBV);
-		AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_SRV);
-		AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER);
+		uint32 SRVRange = AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_SRV);
+		uint32 SamplerRange = AddRange(OutRanges, 0, D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER);
 
-		AddRootParam(OutRootParameters, OutRanges, 0, D3D12_SHADER_VISIBILITY_VERTEX);
-		AddRootParam(OutRootParameters, OutRanges, 1, D3D12_SHADER_VISIBILITY_VERTEX);
-		AddRootParam(OutRootParameters, OutRanges, 2, D3D12_SHADER_VISIBILITY_PIXEL);
-		AddRootParam(OutRootParameters, OutRanges, 3, D3D12_SHADER_VISIBILITY_PIXEL);
+		AddRootCBVParam(OutRootParameters, 0, D3D12_SHADER_VISIBILITY_VERTEX);
+		AddRootCBVParam(OutRootParameters, 1, D3D12_SHADER_VISIBILITY_VERTEX);
+		AddRootTableParam(OutRootParameters, OutRanges, SRVRange, 1, D3D12_SHADER_VISIBILITY_PIXEL);
+		AddRootTableParam(OutRootParameters, OutRanges, SamplerRange, 1, D3D12_SHADER_VISIBILITY_PIXEL);
 	}
 };
 FTestPSO GTestPSO;
@@ -731,6 +729,7 @@ ResourceBarrier(CmdBuffer, &GCheckerboardTexture.Image, D3D12_RESOURCE_STATE_COP
 
 static void FillFloor(FCmdBuffer* CmdBuffer)
 {
+return;
 	ResourceBarrier(CmdBuffer, GFloorVB.VB.Buffer.Alloc->Resource.Get(), D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 	ResourceBarrier(CmdBuffer, GFloorIB.IB.Buffer.Alloc->Resource.Get(), D3D12_RESOURCE_STATE_INDEX_BUFFER, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 	auto* ComputePipeline = GObjectCache.GetOrCreateComputePipeline(&GSetupFloorPSO);
@@ -738,11 +737,14 @@ static void FillFloor(FCmdBuffer* CmdBuffer)
 	FCreateFloorUB& CreateFloorUB = *GCreateFloorUB.GetMappedData();
 	CmdBuffer->CommandList->SetComputeRootSignature(GSetupFloorPSO.RootSignature.Get());
 
+	check(0);
+#if 0
 	ID3D12DescriptorHeap* ppHeaps[] = {GDescriptorPool.CSUHeap.Get()};
 	CmdBuffer->CommandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
-	CmdBuffer->CommandList->SetComputeRootDescriptorTable(0, GFloorIB.GPUHandle);
-	CmdBuffer->CommandList->SetComputeRootDescriptorTable(1, GFloorVB.GPUHandle);
+	CmdBuffer->CommandList->SetComputeRootDescriptorTable(0, GFloorIB);
+	CmdBuffer->CommandList->SetComputeRootDescriptorTable(1, GFloorVB);
 	CmdBuffer->CommandList->SetComputeRootDescriptorTable(2, GCreateFloorUB.GPUHandle);
+#endif
 
 #if ENABLE_VULKAN
 	{
@@ -909,8 +911,8 @@ static void DrawCube(/*FGfxPipeline* GfxPipeline, */FDevice* Device, FCmdBuffer*
 	ID3D12DescriptorHeap* ppHeaps[] = {GDescriptorPool.CSUHeap.Get(), GDescriptorPool.SamplerHeap.Get()};
 	CmdBuffer->CommandList->SetGraphicsRootSignature(GTestPSO.RootSignature.Get());
 	CmdBuffer->CommandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
-	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(0, GViewUB.GPUHandle);
-	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(1, GObjUB.GPUHandle);
+	CmdBuffer->CommandList->SetGraphicsRootConstantBufferView(0, GViewUB.View.BufferLocation);
+	CmdBuffer->CommandList->SetGraphicsRootConstantBufferView(1, GObjUB.View.BufferLocation);
 	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(2, GCheckerboardTexture.ImageView.GPUHandle);
 	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(3, GSampler.GPUHandle);
 
@@ -937,8 +939,8 @@ static void DrawFloor(/*FGfxPipeline* GfxPipeline, */FDevice* Device, FCmdBuffer
 	ID3D12DescriptorHeap* ppHeaps[] = {GDescriptorPool.CSUHeap.Get(), GDescriptorPool.SamplerHeap.Get()};
 	CmdBuffer->CommandList->SetGraphicsRootSignature(GTestPSO.RootSignature.Get());
 	CmdBuffer->CommandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
-	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(0, GViewUB.GPUHandle);
-	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(1, GObjUB.GPUHandle);
+	CmdBuffer->CommandList->SetGraphicsRootConstantBufferView(0, GViewUB.View.BufferLocation);
+	CmdBuffer->CommandList->SetGraphicsRootConstantBufferView(1, GObjUB.View.BufferLocation);
 	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(2, GCheckerboardTexture.ImageView.GPUHandle);
 	CmdBuffer->CommandList->SetGraphicsRootDescriptorTable(3, GSampler.GPUHandle);
 
@@ -983,7 +985,7 @@ static void InternalRenderFrame(FDevice* Device, /*FRenderPass* RenderPass, */FC
 	CmdBind(CmdBuffer, GfxPipeline);
 
 	SetDynamicStates(CmdBuffer, Width, Height);
-	DrawFloor(/*GfxPipeline, */Device, CmdBuffer);
+//DrawFloor(/*GfxPipeline, */Device, CmdBuffer);
 	DrawCube(/*GfxPipeline, */Device, CmdBuffer);
 }
 
