@@ -252,12 +252,6 @@ struct FStagingBuffer : public FBuffer
 
 struct FStagingManager
 {
-	FMemManager* MemMgr = nullptr;
-	void Create(FDevice& InDevice, FMemManager* InMemMgr)
-	{
-		MemMgr = InMemMgr;
-	}
-
 	void Destroy()
 	{
 		Update();
