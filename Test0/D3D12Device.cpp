@@ -53,6 +53,12 @@ void FSwapchain::Create(IDXGIFactory4* DXGI, HWND Hwnd, FDevice& Device, uint32&
 		Device.Device->CreateRenderTargetView(Images[Index].Get(), nullptr, RTVHandle);
 		ImageViews.push_back(RTVHandle);
 
+		Resource->SetName(L"Swapchain");
+
+		//char s[256];
+		//sprintf_s(s, sizeof(s), "*** Swap: %p\n", Resource);
+		//::OutputDebugStringA(s);
+
 #if ENABLE_VULKAN
 		ImageViews[Index].Create(Device, Images[Index], VK_IMAGE_VIEW_TYPE_2D, (VkFormat)BACKBUFFER_VIEW_FORMAT, VK_IMAGE_ASPECT_COLOR_BIT);
 		PresentCompleteSemaphores[Index].Create(Device);

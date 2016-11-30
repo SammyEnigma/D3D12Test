@@ -235,7 +235,7 @@ struct FMemManager
 	std::list<FBufferAllocation*> BufferAllocations;
 	std::list<FResourceAllocation*> ResourceAllocations;
 
-	FBufferAllocation* AllocBuffer(FDevice& InDevice, uint64 InSize, D3D12_RESOURCE_STATES ResourceStates, D3D12_RESOURCE_FLAGS ResourceFlags, bool bUploadCPU)
+	FBufferAllocation* AllocBuffer(LPCWSTR Name, FDevice& InDevice, uint64 InSize, D3D12_RESOURCE_STATES ResourceStates, D3D12_RESOURCE_FLAGS ResourceFlags, bool bUploadCPU)
 	{
 		auto* NewBuffer = new FBufferAllocation;
 
@@ -273,6 +273,7 @@ struct FMemManager
 			checkD3D12(NewBuffer->Resource->Map(0, &ReadRange, &NewBuffer->MappedData));
 		}
 		BufferAllocations.push_back(NewBuffer);
+		NewBuffer->Resource->SetName(Name);
 		return NewBuffer;
 	}
 

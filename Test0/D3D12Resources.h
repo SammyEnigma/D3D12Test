@@ -12,11 +12,11 @@ struct FDescriptorHandle
 
 struct FBuffer
 {
-	void Create(FDevice& InDevice, uint64 InSize, FMemManager& MemMgr, D3D12_RESOURCE_STATES ResourceStates, D3D12_RESOURCE_FLAGS ResourceFlags, bool bUploadCPU)
+	void Create(LPCWSTR Name, FDevice& InDevice, uint64 InSize, FMemManager& MemMgr, D3D12_RESOURCE_STATES ResourceStates, D3D12_RESOURCE_FLAGS ResourceFlags, bool bUploadCPU)
 	{
 		Size = InSize;
 
-		Alloc = MemMgr.AllocBuffer(InDevice, InSize, ResourceStates, ResourceFlags, bUploadCPU);
+		Alloc = MemMgr.AllocBuffer(Name, InDevice, InSize, ResourceStates, ResourceFlags, bUploadCPU);
 	}
 
 	void Destroy()
@@ -46,12 +46,12 @@ struct FIndexBuffer
 	uint32 NumIndices = 0;
 	bool b32Bits = false;
 
-	void Create(FDevice& InDevice, bool bIn32Bits, uint32 InNumIndices, FMemManager& MemMgr, D3D12_RESOURCE_STATES ResourceStates, bool bUploadCPU, D3D12_RESOURCE_FLAGS ResourceFlags = D3D12_RESOURCE_FLAG_NONE)
+	void Create(LPCWSTR Name, FDevice& InDevice, bool bIn32Bits, uint32 InNumIndices, FMemManager& MemMgr, D3D12_RESOURCE_STATES ResourceStates, bool bUploadCPU, D3D12_RESOURCE_FLAGS ResourceFlags = D3D12_RESOURCE_FLAG_NONE)
 	{
 		b32Bits = bIn32Bits;
 		NumIndices = InNumIndices;
 		uint32 Size = NumIndices * (b32Bits ? 4 : 2);
-		Buffer.Create(InDevice, Size, MemMgr, ResourceStates, ResourceFlags, bUploadCPU);
+		Buffer.Create(Name, InDevice, Size, MemMgr, ResourceStates, ResourceFlags, bUploadCPU);
 		View.BufferLocation = Buffer.Alloc->Resource->GetGPUVirtualAddress();
 		View.SizeInBytes = Size;
 		View.Format = b32Bits ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT;
@@ -76,7 +76,7 @@ struct FRWIndexBuffer
 {
 	void Create(FDevice& InDevice, struct FDescriptorPool& Pool, bool bIn32Bits, uint32 InNumIndices, FMemManager& MemMgr, bool bUploadCPU)
 	{
-		IB.Create(InDevice, bIn32Bits, InNumIndices, MemMgr, D3D12_RESOURCE_STATE_INDEX_BUFFER, bUploadCPU, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+		IB.Create(L"RWIndexBuffer", InDevice, bIn32Bits, InNumIndices, MemMgr, D3D12_RESOURCE_STATE_INDEX_BUFFER, bUploadCPU, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
 		MemZero(View);
 		View.Format =  DXGI_FORMAT_UNKNOWN;
 		View.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
@@ -95,9 +95,9 @@ struct FRWIndexBuffer
 
 struct FVertexBuffer
 {
-	void Create(FDevice& InDevice, uint32 Stride, uint32 Size, FMemManager& MemMgr, D3D12_RESOURCE_STATES ResourceStates, bool bUploadCPU, D3D12_RESOURCE_FLAGS ResourceFlags = D3D12_RESOURCE_FLAG_NONE)
+	void Create(LPCWSTR Name, FDevice& InDevice, uint32 Stride, uint32 Size, FMemManager& MemMgr, D3D12_RESOURCE_STATES ResourceStates, bool bUploadCPU, D3D12_RESOURCE_FLAGS ResourceFlags = D3D12_RESOURCE_FLAG_NONE)
 	{
-		Buffer.Create(InDevice, Size, MemMgr, ResourceStates, ResourceFlags, bUploadCPU);
+		Buffer.Create(Name, InDevice, Size, MemMgr, ResourceStates, ResourceFlags, bUploadCPU);
 		View.BufferLocation = Buffer.Alloc->Resource->GetGPUVirtualAddress();
 		View.StrideInBytes = Stride;
 		View.SizeInBytes = Size;
@@ -122,7 +122,7 @@ struct FRWVertexBuffer
 {
 	void Create(FDevice& InDevice, struct FDescriptorPool& Pool, uint32 Stride, uint32 Size, FMemManager& MemMgr, bool bUploadCPU)
 	{
-		VB.Create(InDevice, Stride, Size, MemMgr, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, bUploadCPU, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+		VB.Create(L"RWVertexBuffer", InDevice, Stride, Size, MemMgr, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, bUploadCPU, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
 		MemZero(View);
 		View.Format =  DXGI_FORMAT_UNKNOWN;
 		View.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
@@ -278,7 +278,7 @@ struct FStagingManager
 		}
 
 		auto* Buffer = new FStagingBuffer;
-		Buffer->Create(InDevice, Size, MemMgr, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_FLAG_NONE, true);
+		Buffer->Create(L"Upload", InDevice, Size, MemMgr, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_FLAG_NONE, true);
 		FEntry Entry;
 		Entry.Buffer = Buffer;
 		Entry.bFree = false;
@@ -408,10 +408,6 @@ struct FSampler
 
 	void Destroy()
 	{
-#if ENABLE_VULKAN
-		vkDestroySampler(Device, Sampler, nullptr);
-		Sampler = VK_NULL_HANDLE;
-#endif
 	}
 };
 
@@ -467,12 +463,6 @@ struct FPSO
 
 	virtual void Destroy()
 	{
-#if ENABLE_VULKAN
-		if (DSLayout != VK_NULL_HANDLE)
-		{
-			vkDestroyDescriptorSetLayout(Device, DSLayout, nullptr);
-		}
-#endif
 	}
 
 
@@ -554,12 +544,6 @@ struct FPSO
 		checkD3D12(D3D12SerializeRootSignature(&Desc, D3D_ROOT_SIGNATURE_VERSION_1, &Signature, &Error));
 		checkD3D12(Device.Device->CreateRootSignature(0, Signature->GetBufferPointer(), Signature->GetBufferSize(), IID_PPV_ARGS(&RootSignature)));
 	}
-
-#if ENABLE_VULKAN
-	virtual void SetupShaderStages(std::vector<VkPipelineShaderStageCreateInfo>& OutShaderStages)
-	{
-	}
-#endif
 };
 
 struct FGfxPSO : public FPSO
@@ -618,21 +602,6 @@ struct FVertexFormat
 		check(InSemanticName);
 		SemanticNames.push_back(InSemanticName);
 	}
-
-#if ENABLE_VULKAN
-	VkPipelineVertexInputStateCreateInfo GetCreateInfo()
-	{
-		VkPipelineVertexInputStateCreateInfo VIInfo;
-		MemZero(VIInfo);
-		VIInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-		VIInfo.vertexBindingDescriptionCount = (uint32)VertexBuffers.size();
-		VIInfo.pVertexBindingDescriptions = VertexBuffers.empty() ? nullptr : &VertexBuffers[0];
-		VIInfo.vertexAttributeDescriptionCount = (uint32)VertexAttributes.size();
-		VIInfo.pVertexAttributeDescriptions = VertexAttributes.empty() ? nullptr : &VertexAttributes[0];
-
-		return VIInfo;
-	}
-#endif
 
 	void SetCreateInfo(D3D12_GRAPHICS_PIPELINE_STATE_DESC& OutDesc)
 	{
@@ -708,16 +677,6 @@ struct FComputePSO : public FPSO
 struct FBasePipeline
 {
 	Microsoft::WRL::ComPtr<ID3D12PipelineState> PipelineState;
-#if ENABLE_VULKAN
-	void Destroy(VkDevice Device)
-	{
-		vkDestroyPipeline(Device, Pipeline, nullptr);
-		Pipeline = VK_NULL_HANDLE;
-
-		vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
-		PipelineLayout = VK_NULL_HANDLE;
-	}
-#endif
 };
 
 struct FDescriptorPool
@@ -796,19 +755,9 @@ struct FDescriptorPool
 
 	void Destroy()
 	{
-#if ENABLE_VULKAN
-		vkDestroyDescriptorPool(Device, Pool, nullptr);
-		Pool = VK_NULL_HANDLE;
-#endif
 		CSUHeap = nullptr;
 		RTVHeap = nullptr;
 	}
-
-#if ENABLE_VULKAN
-	VkDescriptorSet AllocateDescriptorSet(VkDescriptorSetLayout DSLayout)
-	{
-	}
-#endif
 
 	FDescriptorHandle AllocateRTV()
 	{
@@ -1188,6 +1137,9 @@ inline void ResourceBarrier(FCmdBuffer* CmdBuffer, ID3D12Resource* Image, D3D12_
 	Barrier.Transition.StateAfter = Dest;
 	Barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
 	CmdBuffer->CommandList->ResourceBarrier(1, &Barrier);
+	//char s[256];
+	//sprintf_s(s, sizeof(s), "*** %p: %d -> %d\n", Image, Src, Dest);
+	//::OutputDebugStringA(s);
 }
 
 inline void ResourceBarrier(FCmdBuffer* CmdBuffer, FImage* Image, D3D12_RESOURCE_STATES Src, D3D12_RESOURCE_STATES Dest)
@@ -1199,13 +1151,7 @@ struct FSwapchain
 {
 	Microsoft::WRL::ComPtr<IDXGISwapChain3> Swapchain;
 	const uint32 BufferCount = 3;
-#if ENABLE_VULKAN
-	enum
-	{
-		SWAPCHAIN_IMAGE_FORMAT = VK_FORMAT_B8G8R8A8_UNORM,
-		BACKBUFFER_VIEW_FORMAT = VK_FORMAT_R8G8B8A8_UNORM,
-	};
-#endif
+
 	uint32 Width = 0;
 	uint32 Height = 0;
 	void Create(IDXGIFactory4* DXGI, HWND Hwnd, FDevice& Device, uint32& WindowWidth, uint32& WindowHeight, FDescriptorPool& Pool);
@@ -1376,10 +1322,12 @@ inline void CopyColorImage(FCmdBuffer* CmdBuffer, uint32 Width, uint32 Height, V
 	}
 	vkCmdCopyImage(CmdBuffer->CmdBuffer, SrcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, DstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &CopyRegion);
 };
+#endif
 
-inline void BlitColorImage(FCmdBuffer* CmdBuffer, uint32 Width, uint32 Height, VkImage SrcImage, VkImageLayout SrcCurrentLayout, VkImage DstImage, VkImageLayout DstCurrentLayout)
+inline void BlitColorImage(FCmdBuffer* CmdBuffer, uint32 Width, uint32 Height, ID3D12Resource* SrcImage, /*VkImageLayout SrcCurrentLayout, */ID3D12Resource* DstImage/*, VkImageLayout DstCurrentLayout*/)
 {
 	check(CmdBuffer->State == FCmdBuffer::EState::Begun);
+#if ENABLE_VULKAN
 	VkImageBlit BlitRegion;
 	MemZero(BlitRegion);
 	BlitRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -1401,8 +1349,9 @@ inline void BlitColorImage(FCmdBuffer* CmdBuffer, uint32 Width, uint32 Height, V
 		ImageBarrier(CmdBuffer, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, DstImage, DstCurrentLayout, 0, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
 	}
 	vkCmdBlitImage(CmdBuffer->CmdBuffer, SrcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, DstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &BlitRegion, VK_FILTER_NEAREST);
-};
 #endif
+	CmdBuffer->CommandList->CopyResource(DstImage, SrcImage);
+};
 
 inline void CmdBind(FCmdBuffer* CmdBuffer, FGfxPipeline * GfxPipeline)
 {
@@ -1416,7 +1365,7 @@ template <typename TStruct>
 inline void FUniformBuffer<TStruct>::Create(FDevice& InDevice, FDescriptorPool& Pool, FMemManager& MemMgr, bool bUploadCPU)
 {
 	uint32 Size = (sizeof(TStruct) + 255) & ~255;
-	Buffer.Create(InDevice, Size, MemMgr, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, D3D12_RESOURCE_FLAG_NONE, bUploadCPU);
+	Buffer.Create(L"UniformBuffer", InDevice, Size, MemMgr, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, D3D12_RESOURCE_FLAG_NONE, bUploadCPU);
 
 	MemZero(View);
 	View.BufferLocation = Buffer.Alloc->Resource->GetGPUVirtualAddress();
@@ -1424,4 +1373,13 @@ inline void FUniformBuffer<TStruct>::Create(FDevice& InDevice, FDescriptorPool& 
 
 	Handle = Pool.AllocateCSU();
 	InDevice.Device->CreateConstantBufferView(&View, Handle.CPU);
+}
+
+inline D3D12_UNORDERED_ACCESS_VIEW_DESC MakeTexture2DUAVDesc(DXGI_FORMAT Format)
+{
+	D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDesc;
+	MemZero(UAVDesc);
+	UAVDesc.Format = Format;
+	UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+	return UAVDesc;
 }
