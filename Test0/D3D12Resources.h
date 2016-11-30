@@ -164,9 +164,9 @@ struct FImage
 	//Microsoft::WRL::ComPtr<ID3D12Resource> Texture;
 	FResourceAllocation* Alloc = nullptr;
 
-	void Create(FDevice& InDevice, uint32 InWidth, uint32 InHeight, DXGI_FORMAT InFormat, FMemManager& MemMgr
+	void Create(FDevice& InDevice, uint32 InWidth, uint32 InHeight, DXGI_FORMAT InFormat, FMemManager& MemMgr, D3D12_RESOURCE_FLAGS ResourceFlags = D3D12_RESOURCE_FLAG_NONE
 #if ENABLE_VULKAN
-		, VkImageUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropertyFlags, uint32 InNumMips, VkSampleCountFlagBits InSamples
+		uint32 InNumMips, VkSampleCountFlagBits InSamples
 #endif
 	)
 	{
@@ -178,7 +178,7 @@ struct FImage
 		NumMips = InNumMips;
 		Samples = InSamples;
 #endif
-		Alloc = MemMgr.AllocTexture2D(InDevice, Width, Height, Format, false);
+		Alloc = MemMgr.AllocTexture2D(InDevice, Width, Height, Format, false, ResourceFlags);
 	}
 
 	void Destroy()
@@ -346,15 +346,15 @@ inline VkImageAspectFlags GetImageAspectFlags(VkFormat Format)
 
 struct FImage2DWithView
 {
-	void Create(FDevice& InDevice, uint32 InWidth, uint32 InHeight, DXGI_FORMAT Format, FDescriptorPool& Pool, FMemManager& MemMgr
+	void Create(FDevice& InDevice, uint32 InWidth, uint32 InHeight, DXGI_FORMAT Format, FDescriptorPool& Pool, FMemManager& MemMgr, D3D12_RESOURCE_FLAGS ResourceFlags = D3D12_RESOURCE_FLAG_NONE
 #if ENABLE_VULKAN
-		, VkImageUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropertyFlags, uint32 InNumMips = 1, VkSampleCountFlagBits Samples = VK_SAMPLE_COUNT_1_BIT
+		, uint32 InNumMips = 1, VkSampleCountFlagBits Samples = VK_SAMPLE_COUNT_1_BIT
 #endif
 	)
 	{
-		Image.Create(InDevice, InWidth, InHeight, Format, MemMgr
+		Image.Create(InDevice, InWidth, InHeight, Format, MemMgr, ResourceFlags
 #if ENABLE_VULKAN
-			, UsageFlags, MemPropertyFlags, InNumMips, Samples
+			, InNumMips, Samples
 #endif
 		);
 

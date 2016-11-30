@@ -11,5 +11,5 @@ Texture2D Texture : register(t0);
 
 float4 Main(FVSOut In) : SV_Target0
 {
-	return float4(In.UVs.xy, 0, 1) + Texture.Sample(Sampler, In.UVs);
+	return /*float4(In.UVs.xy, 0, 1) + */Texture.Sample(Sampler, In.UVs);
 }

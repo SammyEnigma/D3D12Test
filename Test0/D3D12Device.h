@@ -345,6 +345,7 @@ static inline uint32 GetFormatBitsPerPixel(DXGI_FORMAT Format)
 {
 	switch (Format)
 	{
+	case DXGI_FORMAT_R32_FLOAT:
 	case DXGI_FORMAT_R32_SINT:
 	case DXGI_FORMAT_R32_UINT:
 	case DXGI_FORMAT_R8G8B8A8_UNORM:
